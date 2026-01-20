@@ -18,7 +18,7 @@ class MyGeminiClient:
         """
         Generate content using the Gemini client.
         """
-        return await self.client.generate_content(message, model=model, files=files)
+        return await self.client.generate_content(prompt=message, model=model, files=files)
 
     async def close(self) -> None:
         """Close the Gemini client."""

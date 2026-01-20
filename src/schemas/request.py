@@ -56,8 +56,14 @@ class GeminiRequest(BaseModel):
 
 class OpenAIChatRequest(BaseModel):
     messages: List[dict]
-    model: Optional[GeminiModels] = None
+    model: str = "gpt-3.5-turbo"
     stream: Optional[bool] = False
+    temperature: Optional[float] = 1.0
+    top_p: Optional[float] = 1.0
+    n: Optional[int] = 1
+    max_tokens: Optional[int] = None
+    presence_penalty: Optional[float] = 0.0
+    frequency_penalty: Optional[float] = 0.0
 
 class Part(BaseModel):
     text: str
