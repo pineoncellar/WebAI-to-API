@@ -6,11 +6,27 @@ import os
 import sqlite3
 import json
 import base64
+import tempfile
+import shutil
+import socket
+import subprocess
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional, Literal, Dict, Any
+
+import httpx
+
 from app.config import CONFIG
 
 # Windows-specific imports for cookie decryption
+try:
+    from websocket import create_connection  # type: ignore
+    HAS_WEBSOCKET = True
+except ImportError:
+    HAS_WEBSOCKET = False
+
+
 if platform.system().lower() == "windows":
     try:
         import win32crypt
@@ -54,7 +70,9 @@ class CrossPlatformCookieExtractor:
                 
                 paths = {
                     "cookies_db": cookies_path,
-                    "local_state": os.path.join(base_path, "Local State")
+                    "local_state": os.path.join(base_path, "Local State"),
+                    "user_data_dir": base_path,
+                    "profile_directory": "Default",
                 }
                 
             elif browser_name == "brave":
@@ -73,7 +91,9 @@ class CrossPlatformCookieExtractor:
                 
                 paths = {
                     "cookies_db": cookies_path,
-                    "local_state": os.path.join(base_path, "Local State")
+                    "local_state": os.path.join(base_path, "Local State"),
+                    "user_data_dir": base_path,
+                    "profile_directory": "Default",
                 }
                 
             elif browser_name == "edge":
@@ -92,7 +112,9 @@ class CrossPlatformCookieExtractor:
                 
                 paths = {
                     "cookies_db": cookies_path,
-                    "local_state": os.path.join(base_path, "Local State")
+                    "local_state": os.path.join(base_path, "Local State"),
+                    "user_data_dir": base_path,
+                    "profile_directory": "Default",
                 }
                 
             elif browser_name == "firefox":
@@ -104,6 +126,194 @@ class CrossPlatformCookieExtractor:
                         paths = {"cookies_db": os.path.join(profile_path, "cookies.sqlite")}
         
         return paths
+
+    def _get_free_port(self) -> int:
+        """Allocate an ephemeral port on localhost."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
+    def _find_browser_executable(self, browser_name: str) -> Optional[str]:
+        """Locate the browser executable on Windows."""
+        if not self.is_windows:
+            return shutil.which(browser_name)
+
+        candidates = []
+        pf = os.environ.get("ProgramFiles", "")
+        pf86 = os.environ.get("ProgramFiles(x86)", "")
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+
+        if browser_name == "edge":
+            candidates.extend(
+                [
+                    os.path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe"),
+                    os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+                ]
+            )
+        elif browser_name == "chrome":
+            candidates.extend(
+                [
+                    os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+                    os.path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
+                    os.path.join(local_app_data, "Google", "Chrome", "Application", "chrome.exe"),
+                ]
+            )
+        elif browser_name == "brave":
+            candidates.extend(
+                [
+                    os.path.join(pf, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                    os.path.join(pf86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                ]
+            )
+
+        # Fallback to PATH lookup
+        candidates.append(shutil.which(browser_name))
+
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+
+        logger.warning(f"Executable for {browser_name} not found in standard locations")
+        return None
+
+    def _get_chromium_cookies_via_devtools(self, browser_name: str) -> Optional[list]:
+        """Leverage Chromium DevTools protocol to fetch decrypted cookies."""
+        if not (self.is_windows and HAS_WEBSOCKET):
+            if self.is_windows and not HAS_WEBSOCKET:
+                logger.debug("websocket-client not available; skipping DevTools extraction")
+            return None
+
+        browser_paths = self._get_browser_profile_paths(browser_name)
+        user_data_dir = browser_paths.get("user_data_dir")
+        profile_directory = browser_paths.get("profile_directory", "Default")
+        executable_path = self._find_browser_executable(browser_name)
+
+        if not executable_path or not user_data_dir:
+            logger.warning(f"Insufficient data for DevTools extraction for {browser_name}")
+            return None
+
+        if not os.path.exists(user_data_dir):
+            logger.warning(f"User data directory not found for {browser_name}: {user_data_dir}")
+            return None
+
+        port = self._get_free_port()
+        command = [
+            executable_path,
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={user_data_dir}",
+            f"--profile-directory={profile_directory}",
+            f"--remote-allow-origins=http://127.0.0.1:{port}",
+            "--headless=new",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "about:blank",
+        ]
+
+        logger.info(f"Launching {browser_name} for DevTools cookie extraction (port {port})")
+
+        creationflags = 0
+        if self.is_windows:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to launch {browser_name} for DevTools extraction: {exc}")
+            return None
+
+        ws_url = None
+        try:
+            for _ in range(40):  # Allow up to ~10 seconds
+                time.sleep(0.25)
+                try:
+                    response = httpx.get(f"http://127.0.0.1:{port}/json/version", timeout=1.0)
+                    if response.status_code == 200:
+                        ws_url = response.json().get("webSocketDebuggerUrl")
+                        if ws_url:
+                            break
+                except Exception:
+                    continue
+
+            if not ws_url:
+                logger.error("DevTools endpoint not reachable; ensure the browser profile is not already running.")
+                return None
+
+            logger.info("Connecting to DevTools websocket for cookie retrieval")
+
+            cookies = []
+            ws = None
+            try:
+                ws = create_connection(ws_url, timeout=5)
+
+                message_id = 0
+
+                def send_command(method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    nonlocal message_id
+                    message_id += 1
+                    ws.send(json.dumps({"id": message_id, "method": method, "params": params or {}}))
+                    while True:
+                        reply = json.loads(ws.recv())
+                        if reply.get("id") == message_id:
+                            return reply
+
+                send_command("Network.enable")
+
+                url_candidates = [
+                    "https://gemini.google.com",
+                    "https://www.google.com",
+                    "https://accounts.google.com",
+                ]
+
+                cookie_reply = send_command("Network.getCookies", {"urls": url_candidates})
+                cookies = cookie_reply.get("result", {}).get("cookies", [])
+
+                if not cookies:
+                    storage_reply = send_command("Storage.getCookies")
+                    cookies = storage_reply.get("result", {}).get("cookies", [])
+
+            finally:
+                if ws:
+                    ws.close()
+
+            result = []
+            for cookie in cookies:
+                result.append(
+                    SimpleNamespace(
+                        name=cookie.get("name", ""),
+                        value=cookie.get("value", ""),
+                        domain=cookie.get("domain", ""),
+                        path=cookie.get("path", ""),
+                        expires=cookie.get("expires", 0),
+                        secure=cookie.get("secure", False),
+                        httponly=cookie.get("httpOnly", False),
+                    )
+                )
+
+            if result:
+                logger.info("Successfully retrieved cookies via DevTools protocol")
+            else:
+                logger.warning("DevTools cookie retrieval returned no entries")
+
+            return result if result else None
+
+        except Exception as exc:
+            logger.error(f"DevTools cookie extraction failed: {exc}")
+            return None
+        finally:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
     
     def _try_browser_cookie3(self, browser_name: str) -> Optional[Any]:
         """Try to get cookies using browser_cookie3 library"""
@@ -165,162 +375,216 @@ class CrossPlatformCookieExtractor:
             # Extract components
             version = encrypted_value[:3]
             logger.info(f"Cookie encryption version: {version}")
-            
-            if version != b'v10' and version != b'v11':
-                # Try old DPAPI method for older Chrome versions
-                logger.info("Trying DPAPI decryption for older Chrome")
+
+            if not version.startswith(b"v1") and not version.startswith(b"v2"):
+                logger.info("Trying DPAPI decryption for legacy Chromium cookie format")
                 try:
                     decrypted = win32crypt.CryptUnprotectData(encrypted_value, None, None, None, 0)[1]
-                    result = decrypted.decode('utf-8')
+                    result = decrypted.decode("utf-8")
                     logger.info(f"DPAPI decryption successful, result length: {len(result)}")
                     return result
                 except Exception as e:
                     logger.warning(f"DPAPI decryption failed: {e}")
                     return None
-            
+
             nonce = encrypted_value[3:15]
             ciphertext = encrypted_value[15:-16]
             tag = encrypted_value[-16:]
-            
+
             logger.info(f"AES-GCM components - nonce: {len(nonce)}, ciphertext: {len(ciphertext)}, tag: {len(tag)}")
-            
-            # Decrypt using AES-GCM
-            cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-            decrypted = cipher.decrypt_and_verify(ciphertext, tag)
-            
-            result = decrypted.decode('utf-8')
-            logger.info(f"AES-GCM decryption successful, result length: {len(result)}")
-            return result
+
+            try:
+                cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+                decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+                result = decrypted.decode('utf-8')
+                logger.info(f"AES-GCM decryption successful, result length: {len(result)}")
+                return result
+            except ValueError as aes_error:
+                logger.warning(f"AES-GCM decryption failed ({aes_error}). Attempting DPAPI fallback.")
+                try:
+                    decrypted = win32crypt.CryptUnprotectData(encrypted_value, None, None, None, 0)[1]
+                    result = decrypted.decode('utf-8')
+                    logger.info(f"DPAPI fallback successful, result length: {len(result)}")
+                    return result
+                except Exception as dpapi_error:
+                    logger.warning(f"DPAPI fallback failed: {dpapi_error}")
+                    return None
             
         except Exception as e:
             logger.error(f"Failed to decrypt Chrome cookie: {e}", exc_info=True)
             return None
+
+    def _get_firefox_cookies_direct(self, cookies_db_path: str) -> Optional[list]:
         """Direct Firefox cookie extraction from SQLite database"""
         try:
             if not os.path.exists(cookies_db_path):
                 logger.warning(f"Firefox cookies database not found: {cookies_db_path}")
                 return None
-            
+
             # Copy the database to avoid lock issues
             import tempfile
             import shutil
-            
-            with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as temp_file:
+
+            with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as temp_file:
                 temp_db_path = temp_file.name
                 shutil.copy2(cookies_db_path, temp_db_path)
-            
+
             try:
                 conn = sqlite3.connect(temp_db_path)
                 cursor = conn.cursor()
-                
-                # Firefox cookie table structure
-                cursor.execute("""
-                    SELECT name, value, host, path, expiry, isSecure, isHttpOnly 
-                    FROM moz_cookies 
+
+                cursor.execute(
+                    """
+                    SELECT name, value, host, path, expiry, isSecure, isHttpOnly
+                    FROM moz_cookies
                     WHERE host LIKE '%google%' AND (name = '__Secure-1PSID' OR name = '__Secure-1PSIDTS')
-                """)
-                
+                    """
+                )
+
                 cookies = []
                 for row in cursor.fetchall():
-                    cookie_obj = type('Cookie', (), {
-                        'name': row[0],
-                        'value': row[1],
-                        'domain': row[2],
-                        'path': row[3],
-                        'expires': row[4],
-                        'secure': bool(row[5]),
-                        'httponly': bool(row[6])
-                    })()
+                    cookie_obj = type(
+                        "Cookie",
+                        (),
+                        {
+                            "name": row[0],
+                            "value": row[1],
+                            "domain": row[2],
+                            "path": row[3],
+                            "expires": row[4],
+                            "secure": bool(row[5]),
+                            "httponly": bool(row[6]),
+                        },
+                    )()
                     cookies.append(cookie_obj)
-                
+
                 conn.close()
                 return cookies
             finally:
-                # Clean up temp file
+                # Clean up temp file copy if present
                 try:
                     os.unlink(temp_db_path)
-                except:
+                except OSError:
                     pass
-                    
+
         except Exception as e:
             logger.error(f"Failed to extract Firefox cookies directly: {e}")
             return None
     
     def _get_chromium_cookies_direct(self, cookies_db_path: str, local_state_path: str = None) -> Optional[list]:
         """Direct Chromium-based browser cookie extraction with decryption support"""
+        temp_db_path = None
+        connection = None
+
         try:
             if not os.path.exists(cookies_db_path):
                 logger.warning(f"Chromium cookies database not found: {cookies_db_path}")
                 return None
-            
-            # Copy the database to avoid lock issues
-            import tempfile
-            import shutil
-            
-            with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_file:
-                temp_db_path = temp_file.name
-                shutil.copy2(cookies_db_path, temp_db_path)
-            
+
             try:
-                conn = sqlite3.connect(temp_db_path)
-                cursor = conn.cursor()
-                
-                # Chromium cookie table structure - get encrypted_value too
-                cursor.execute("""
-                    SELECT name, value, encrypted_value, host_key, path, expires_utc, is_secure, is_httponly 
-                    FROM cookies 
-                    WHERE host_key LIKE '%google%' AND (name = '__Secure-1PSID' OR name = '__Secure-1PSIDTS')
-                """)
-                
-                logger.info(f"Found {cursor.rowcount} matching cookies in database")
-                
-                cookies = []
-                for row in cursor.fetchall():
-                    name, value, encrypted_value, host_key, path, expires_utc, is_secure, is_httponly = row
-                    
-                    logger.info(f"Processing cookie: {name}")
-                    logger.info(f"  - Plain value length: {len(value) if value else 0}")
-                    logger.info(f"  - Encrypted value length: {len(encrypted_value) if encrypted_value else 0}")
-                    logger.info(f"  - Host: {host_key}")
-                    
-                    # Try to decrypt the cookie value if it's encrypted
-                    final_value = value
-                    if not value and encrypted_value and self.is_windows and local_state_path:
-                        logger.info(f"  - Attempting to decrypt {name}")
-                        decrypted_value = self._decrypt_chrome_cookie_value(encrypted_value, local_state_path)
-                        if decrypted_value:
-                            final_value = decrypted_value
-                            logger.info(f"  - Successfully decrypted cookie: {name} (length: {len(final_value)})")
-                        else:
-                            logger.warning(f"  - Failed to decrypt cookie: {name}")
-                    elif value:
-                        logger.info(f"  - Using plain text value for {name}")
+                temp_fd, temp_db_path = tempfile.mkstemp(suffix=".db")
+                os.close(temp_fd)
+                shutil.copy2(cookies_db_path, temp_db_path)
+                connection = sqlite3.connect(temp_db_path)
+            except OSError as copy_error:
+                if getattr(copy_error, "winerror", None) == 32:
+                    logger.warning("Chromium cookies database is locked. Using read-only SQLite connection.")
+                    if temp_db_path and os.path.exists(temp_db_path):
+                        try:
+                            os.unlink(temp_db_path)
+                        except OSError:
+                            pass
+                    temp_db_path = None
+
+                    resolved_path = Path(cookies_db_path).resolve()
+                    readonly_base_uri = resolved_path.as_uri()
+
+                    readonly_uri_attempts = [
+                        f"{readonly_base_uri}?mode=ro&immutable=1",
+                        f"{readonly_base_uri}?mode=ro",
+                    ]
+
+                    last_error = None
+                    for readonly_uri in readonly_uri_attempts:
+                        try:
+                            connection = sqlite3.connect(readonly_uri, uri=True)
+                            last_error = None
+                            break
+                        except sqlite3.OperationalError as sqlite_error:
+                            last_error = sqlite_error
+                            logger.warning(
+                                "Read-only SQLite connection failed with URI %s: %s",
+                                readonly_uri,
+                                sqlite_error,
+                            )
+
+                    if not connection:
+                        raise last_error if last_error else sqlite3.OperationalError(
+                            "Unable to open Chromium cookies database in read-only mode"
+                        )
+                else:
+                    raise
+
+            cursor = connection.cursor()
+
+            cursor.execute(
+                """
+                SELECT name, value, encrypted_value, host_key, path, expires_utc, is_secure, is_httponly
+                FROM cookies
+                WHERE host_key LIKE '%google%' AND (name = '__Secure-1PSID' OR name = '__Secure-1PSIDTS')
+                """
+            )
+
+            cookies = []
+            for row in cursor.fetchall():
+                name, value, encrypted_value, host_key, path, expires_utc, is_secure, is_httponly = row
+
+                if isinstance(value, memoryview):
+                    value = value.tobytes().decode("utf-8", errors="ignore")
+                if isinstance(encrypted_value, memoryview):
+                    encrypted_value = encrypted_value.tobytes()
+
+                final_value = value
+                if not value and encrypted_value and self.is_windows and local_state_path:
+                    decrypted_value = self._decrypt_chrome_cookie_value(encrypted_value, local_state_path)
+                    if decrypted_value:
+                        final_value = decrypted_value
                     else:
-                        logger.warning(f"  - No value found for {name} (neither plain nor encrypted)")
-                    
-                    cookie_obj = type('Cookie', (), {
-                        'name': name,
-                        'value': final_value or '',
-                        'domain': host_key,
-                        'path': path,
-                        'expires': expires_utc,
-                        'secure': bool(is_secure),
-                        'httponly': bool(is_httponly)
-                    })()
-                    cookies.append(cookie_obj)
-                
-                conn.close()
-                return cookies
-            finally:
-                # Clean up temp file
-                try:
-                    os.unlink(temp_db_path)
-                except:
-                    pass
-                    
+                        logger.warning(f"Failed to decrypt cookie: {name}")
+                elif not value:
+                    logger.warning(f"No value found for {name} (neither plain nor encrypted)")
+
+                cookie_obj = type(
+                    "Cookie",
+                    (),
+                    {
+                        "name": name,
+                        "value": final_value or "",
+                        "domain": host_key,
+                        "path": path,
+                        "expires": expires_utc,
+                        "secure": bool(is_secure),
+                        "httponly": bool(is_httponly),
+                    },
+                )()
+                cookies.append(cookie_obj)
+
+            if cookies and all(not getattr(cookie, "value", "") for cookie in cookies):
+                logger.warning("Chromium cookies extraction yielded empty values; will fallback to alternative methods.")
+                return None
+
+            return cookies
         except Exception as e:
             logger.error(f"Failed to extract Chromium cookies directly: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
+            if temp_db_path:
+                try:
+                    os.unlink(temp_db_path)
+                except OSError:
+                    pass
     
     def get_cookies_with_fallback(self, browser_name: str) -> Optional[Any]:
         """Get cookies with multiple fallback methods"""
@@ -355,6 +619,14 @@ class CrossPlatformCookieExtractor:
                         return cookies
                 else:
                     logger.warning(f"Cookies database not found for {browser_name} at expected locations")
+
+                logger.info(f"Attempting DevTools-based extraction for {browser_name}")
+                cookies = self._get_chromium_cookies_via_devtools(browser_name)
+                if cookies:
+                    logger.info(f"Successfully retrieved {browser_name} cookies via DevTools protocol")
+                    return cookies
+                else:
+                    logger.warning(f"DevTools extraction failed for {browser_name}")
         
         logger.warning(f"All cookie extraction methods failed for {browser_name}")
         return None

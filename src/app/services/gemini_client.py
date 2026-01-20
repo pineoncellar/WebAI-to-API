@@ -1,6 +1,6 @@
 # src/app/services/gemini_client.py
 from models.gemini import MyGeminiClient
-from app.config import CONFIG
+from app.config import CONFIG, save_config
 from app.logger import logger
 from app.utils.browser import get_cookie_from_browser
 
@@ -25,15 +25,52 @@ async def init_gemini_client() -> bool:
                 cookies = get_cookie_from_browser("gemini")
                 if cookies:
                     gemini_cookie_1PSID, gemini_cookie_1PSIDTS = cookies
+                    CONFIG["Cookies"]["gemini_cookie_1PSID"] = gemini_cookie_1PSID
+                    CONFIG["Cookies"]["gemini_cookie_1PSIDTS"] = gemini_cookie_1PSIDTS
+                    save_config(CONFIG)
             
             if gemini_proxy == "":
                 gemini_proxy = None
             
             if gemini_cookie_1PSID and gemini_cookie_1PSIDTS:
-                _gemini_client = MyGeminiClient(secure_1psid=gemini_cookie_1PSID, secure_1psidts=gemini_cookie_1PSIDTS, proxy=gemini_proxy)
-                await _gemini_client.init()
-                # logger.info("Gemini client initialized successfully.")
-                return True
+                try:
+                    _gemini_client = MyGeminiClient(
+                        secure_1psid=gemini_cookie_1PSID,
+                        secure_1psidts=gemini_cookie_1PSIDTS,
+                        proxy=gemini_proxy,
+                    )
+                    await _gemini_client.init()
+                    return True
+                except AuthError as auth_exc:
+                    logger.warning(
+                        f"Gemini authentication failed with stored cookies: {auth_exc}. Attempting browser refresh."
+                    )
+                    _gemini_client = None
+
+                    cookies = get_cookie_from_browser("gemini")
+                    if cookies:
+                        gemini_cookie_1PSID, gemini_cookie_1PSIDTS = cookies
+                        CONFIG["Cookies"]["gemini_cookie_1PSID"] = gemini_cookie_1PSID
+                        CONFIG["Cookies"]["gemini_cookie_1PSIDTS"] = gemini_cookie_1PSIDTS
+                        save_config(CONFIG)
+
+                        try:
+                            _gemini_client = MyGeminiClient(
+                                secure_1psid=gemini_cookie_1PSID,
+                                secure_1psidts=gemini_cookie_1PSIDTS,
+                                proxy=gemini_proxy,
+                            )
+                            await _gemini_client.init()
+                            logger.info("Gemini cookies refreshed from browser and client reinitialized.")
+                            return True
+                        except AuthError as refreshed_exc:
+                            logger.error(
+                                f"Gemini authentication failed even after refreshing cookies: {refreshed_exc}"
+                            )
+                            _gemini_client = None
+                            return False
+                    logger.error("Unable to refresh Gemini cookies from browser after authentication failure.")
+                    return False
             else:
                 logger.warning("Gemini cookies not found. Gemini API will not be available.")
                 return False

@@ -5,6 +5,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def save_config(config: configparser.ConfigParser, config_file: str = "config.conf") -> None:
+    """Persist the current in-memory configuration to disk."""
+    try:
+        with open(config_file, "w", encoding="utf-8") as config_file_handle:
+            config.write(config_file_handle)
+    except Exception as exc:
+        logger.error(f"Error writing to config file: {exc}")
+
+
 def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     try:
@@ -31,12 +40,7 @@ def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
         config["Auth"] = {"api_key": ""}
 
     # Save changes to the configuration file, also with UTF-8 encoding.
-    try:
-        with open(config_file, "w", encoding="utf-8") as f:
-            config.write(f)
-        # logger.info("Configuration loaded/updated successfully.")
-    except Exception as e:
-        logger.error(f"Error writing to config file: {e}")
+    save_config(config, config_file)
 
     return config
 
