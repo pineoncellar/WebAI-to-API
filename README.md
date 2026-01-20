@@ -140,6 +140,26 @@ Send a POST request to `/v1/chat/completions` (or any other available endpoint) 
 
 ---
 
+## Authentication
+
+To secure your API (especially when exposing to the public), you can configure an API Key in `config.conf`.
+
+1. Open `config.conf`.
+2. Find or add the `[Auth]` section.
+3. Set your desired API key:
+   ```ini
+   [Auth]
+   api_key = your-secret-key-here
+   ```
+4. Restart the server.
+
+Once enabled, all requests must include the `Authorization` header:
+```http
+Authorization: Bearer your-secret-key-here
+```
+
+---
+
 ## Documentation
 
 ### WebAI-to-API Endpoints

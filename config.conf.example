@@ -28,6 +28,14 @@ default_ai = gemini
 # - gemini-3.0-pro
 default_model_gemini = gemini-3.0-pro
 
+# --- Authentication Settings ---
+# Secure your API by setting an API key.
+# If 'api_key' is set, all requests must include the header:
+# Authorization: Bearer <your_api_key>
+# If left empty, authentication is disabled (open access).
+[Auth]
+api_key = 
+
 # --- Gemini Cookies ---
 # Provide your authentication cookies for Gemini here.
 # You can either paste them manually or log in via browser to generate them.

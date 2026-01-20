@@ -27,6 +27,8 @@ def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
         config["AI"] = {"default_model_gemini": "gemini-3.0-pro"}
     if "Proxy" not in config:
         config["Proxy"] = {"http_proxy": ""}
+    if "Auth" not in config:
+        config["Auth"] = {"api_key": ""}
 
     # Save changes to the configuration file, also with UTF-8 encoding.
     try:

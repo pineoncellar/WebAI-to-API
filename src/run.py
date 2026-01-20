@@ -79,6 +79,12 @@ def start_webai_server(
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+    # 在子进程中重新初始化 Gemini 客户端
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(init_gemini_client())
+    loop.close()
+
     config = uvicorn.Config(
         webai_app, host=host, port=port, reload=reload, log_config=None
     )

@@ -1,11 +1,12 @@
 # src/app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.gemini_client import get_gemini_client
 from app.services.session_manager import init_session_managers
 from app.logger import logger
+from app.security import verify_api_key
 
 # Import endpoint routers
 from app.endpoints import gemini, chat, google_generative
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     # The underlying HTTPX client manages its connection pool automatically.
     logger.info("Application shutdown complete.")
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(verify_api_key)])
 
 app.add_middleware(
     CORSMiddleware,
