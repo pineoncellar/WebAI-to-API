@@ -1,1 +1,1 @@
-poetry run python src/run.py
+poetry run python src/run.py --host 0.0.0.0
