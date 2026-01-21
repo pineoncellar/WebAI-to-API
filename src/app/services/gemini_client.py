@@ -33,6 +33,16 @@ async def init_gemini_client() -> bool:
                 gemini_proxy = None
             
             if gemini_cookie_1PSID and gemini_cookie_1PSIDTS:
+                if _gemini_client:
+                    try:
+                        await _gemini_client.close()
+                    except Exception as close_exc:
+                        logger.warning(
+                            f"Failed to close existing Gemini client before reinitialization: {close_exc}"
+                        )
+                    finally:
+                        _gemini_client = None
+
                 try:
                     _gemini_client = MyGeminiClient(
                         secure_1psid=gemini_cookie_1PSID,

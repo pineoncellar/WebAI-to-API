@@ -3,11 +3,12 @@ import time
 import uuid
 import json
 import asyncio
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.logger import logger
 from schemas.request import GeminiRequest, OpenAIChatRequest
-from app.services.gemini_client import get_gemini_client
+from app.services.gemini_client import get_gemini_client, init_gemini_client
 from app.services.session_manager import get_translate_session_manager
 
 router = APIRouter()
@@ -141,12 +142,45 @@ async def chat_completions(request: OpenAIChatRequest):
     full_prompt = build_context_prompt(request.messages)
 
     try:
-        # Currently we wait for full generation, then stream it if requested
-        response = await gemini_client.generate_content(message=full_prompt, model=target_model, files=None)
+        max_attempts = 2
+        response = None
+        last_transport_exc = None
+
+        for attempt in range(max_attempts):
+            try:
+                # Currently we wait for full generation, then stream it if requested
+                response = await gemini_client.generate_content(
+                    message=full_prompt,
+                    model=target_model,
+                    files=None,
+                )
+                break
+            except httpx.RemoteProtocolError as transport_exc:
+                last_transport_exc = transport_exc
+                logger.warning(
+                    "Gemini transport error during chat completion (attempt %d/%d): %s",
+                    attempt + 1,
+                    max_attempts,
+                    transport_exc,
+                )
+                if attempt + 1 >= max_attempts:
+                    raise
+
+                reinit_ok = await init_gemini_client()
+                gemini_client = get_gemini_client()
+                if not reinit_ok or not gemini_client:
+                    logger.error("Failed to reinitialize Gemini client after transport error.")
+                    raise transport_exc
+
+                # Small delay to give the upstream service time to settle
+                await asyncio.sleep(0.5)
         
+        if response is None:
+            raise last_transport_exc or RuntimeError("Gemini client returned no response")
+
         if not response.text:
-             logger.error("Gemini returned empty response text. This usually means the parsing layout changed/failed.")
-             raise ValueError("Empty response from Gemini. Check server logs for parsing errors.")
+            logger.error("Gemini returned empty response text. This usually means the parsing layout changed/failed.")
+            raise ValueError("Empty response from Gemini. Check server logs for parsing errors.")
 
         if request.stream:
             return StreamingResponse(
