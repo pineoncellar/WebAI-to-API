@@ -2,7 +2,8 @@
 from typing import Optional, List, Union
 from pathlib import Path
 from gemini_webapi import GeminiClient as WebGeminiClient
-from app.config import CONFIG
+from app.config import is_debug_mode
+from app.logger import logger
 
 class MyGeminiClient:
     """
@@ -10,6 +11,7 @@ class MyGeminiClient:
     """
     def __init__(self, secure_1psid: str, secure_1psidts: str, proxy: str | None = None) -> None:
         self.client = WebGeminiClient(secure_1psid, secure_1psidts, proxy)
+        self._debug = is_debug_mode()
 
     async def init(self) -> None:
         """Initialize the Gemini client."""
@@ -18,7 +20,12 @@ class MyGeminiClient:
         """
         Generate content using the Gemini client.
         """
-        return await self.client.generate_content(prompt=message, model=model, files=files)
+        if self._debug:
+            logger.debug("Gemini generate_content payload | model=%s | prompt=%s | files=%s", model, message, files)
+        response = await self.client.generate_content(prompt=message, model=model, files=files)
+        if self._debug:
+            logger.debug("Gemini generate_content response text: %s", getattr(response, "text", response))
+        return response
 
     async def close(self) -> None:
         """Close the Gemini client."""
@@ -28,4 +35,6 @@ class MyGeminiClient:
         """
         Start a chat session with the given model.
         """
+        if self._debug:
+            logger.debug("Gemini start_chat initiated for model=%s", model)
         return self.client.start_chat(model=model)

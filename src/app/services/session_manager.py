@@ -2,6 +2,7 @@
 import asyncio
 from app.logger import logger
 from app.services.gemini_client import get_gemini_client
+from app.config import is_debug_mode
 
 class SessionManager:
     def __init__(self, client):
@@ -9,9 +10,12 @@ class SessionManager:
         self.session = None
         self.model = None
         self.lock = asyncio.Lock()
+        self._debug = is_debug_mode()
 
     async def get_response(self, model, message, images):
         async with self.lock:
+            if self._debug:
+                logger.debug("SessionManager request | model=%s | message=%s | images=%s", model, message, images)
             # Start a new session if none exists or the model has changed
             if self.session is None or self.model != model:
                 if self.session is not None:
@@ -25,7 +29,10 @@ class SessionManager:
             try:
                 # FIX: The underlying library `gemini-webapi` has changed its keyword arguments
                 # in a recent update. `message` is now `prompt` and `images` is now `files`.
-                return await self.session.send_message(prompt=message, files=images)
+                response = await self.session.send_message(prompt=message, files=images)
+                if self._debug:
+                    logger.debug("SessionManager response text: %s", getattr(response, "text", response))
+                return response
             except Exception as e:
                 logger.error(f"Error in session get_response: {e}", exc_info=True)
                 raise

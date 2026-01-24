@@ -55,3 +55,8 @@ gemini = true
 # Example: http_proxy = http://127.0.0.1:2334
 [Proxy]
 http_proxy =
+
+# --- Logging Configuration ---
+# Enable verbose debug logging and payload capture when set to true.
+[Logging]
+debug = false

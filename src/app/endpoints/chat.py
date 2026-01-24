@@ -10,8 +10,18 @@ from app.logger import logger
 from schemas.request import GeminiRequest, OpenAIChatRequest
 from app.services.gemini_client import get_gemini_client, init_gemini_client
 from app.services.session_manager import get_translate_session_manager
+from app.config import is_debug_mode
 
 router = APIRouter()
+DEBUG_MODE = is_debug_mode()
+
+
+def _serialize_payload(payload):
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    if hasattr(payload, "dict"):
+        return payload.dict()
+    return payload
 
 @router.post("/translate")
 async def translate_chat(request: GeminiRequest):
@@ -19,9 +29,13 @@ async def translate_chat(request: GeminiRequest):
     session_manager = get_translate_session_manager()
     if not gemini_client or not session_manager:
         raise HTTPException(status_code=503, detail="Gemini client is not initialized.")
+    if DEBUG_MODE:
+        logger.debug("/translate request payload: %s", _serialize_payload(request))
     try:
         # This call now correctly uses the fixed session manager
         response = await session_manager.get_response(request.model, request.message, request.files)
+        if DEBUG_MODE:
+            logger.debug("/translate response text: %s", getattr(response, "text", response))
         return {"response": response.text}
     except Exception as e:
         logger.error(f"Error in /translate endpoint: {e}", exc_info=True)
@@ -137,9 +151,13 @@ async def chat_completions(request: OpenAIChatRequest):
     
     if not request.messages:
         raise HTTPException(status_code=400, detail="No messages provided.")
+    if DEBUG_MODE:
+        logger.debug("/v1/chat/completions request payload: %s", _serialize_payload(request))
     
     target_model = normalize_model_name(request.model)
     full_prompt = build_context_prompt(request.messages)
+    if DEBUG_MODE:
+        logger.debug("Constructed prompt for Gemini (model=%s): %s", target_model, full_prompt)
 
     try:
         max_attempts = 2
@@ -182,13 +200,21 @@ async def chat_completions(request: OpenAIChatRequest):
             logger.error("Gemini returned empty response text. This usually means the parsing layout changed/failed.")
             raise ValueError("Empty response from Gemini. Check server logs for parsing errors.")
 
+        if DEBUG_MODE:
+            logger.debug("Raw Gemini response text: %s", response.text)
+
         if request.stream:
+            if DEBUG_MODE:
+                logger.debug("Returning streaming response for /v1/chat/completions")
             return StreamingResponse(
                 generate_openai_stream(response.text, request.model),
                 media_type="text/event-stream"
             )
         else:
-            return convert_to_openai_format(response.text, request.model, False)
+            openai_response = convert_to_openai_format(response.text, request.model, False)
+            if DEBUG_MODE:
+                logger.debug("OpenAI-formatted response: %s", openai_response)
+            return openai_response
             
     except Exception as e:
         logger.error(f"Error in /v1/chat/completions endpoint: {e}", exc_info=True)

@@ -38,6 +38,8 @@ def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
         config["Proxy"] = {"http_proxy": ""}
     if "Auth" not in config:
         config["Auth"] = {"api_key": ""}
+    if "Logging" not in config:
+        config["Logging"] = {"debug": "false"}
 
     # Save changes to the configuration file, also with UTF-8 encoding.
     save_config(config, config_file)
@@ -47,3 +49,8 @@ def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
 
 # Load configuration globally
 CONFIG = load_config()
+
+
+def is_debug_mode() -> bool:
+    """Return whether debug logging mode is enabled in the configuration."""
+    return CONFIG.getboolean("Logging", "debug", fallback=False)

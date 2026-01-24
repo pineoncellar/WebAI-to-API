@@ -1,8 +1,27 @@
 # src/app/logger.py
 import logging
+from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+from app.config import is_debug_mode
+
+
+DEBUG_MODE = is_debug_mode()
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+handlers: list[logging.Handler] = [logging.StreamHandler()]
+log_file_path: Path | None = None
+
+if DEBUG_MODE:
+    log_file_path = Path("logs") / "debug.log"
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    handlers.append(file_handler)
+
+logging.basicConfig(level=logging.DEBUG if DEBUG_MODE else logging.INFO, format=LOG_FORMAT, handlers=handlers, force=True)
+
 logger = logging.getLogger("app")
+logger.setLevel(logging.DEBUG if DEBUG_MODE else logging.INFO)
+
+if DEBUG_MODE and log_file_path is not None:
+    logger.debug("Debug logging enabled; capturing payloads and responses in %s.", log_file_path)
