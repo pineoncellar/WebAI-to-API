@@ -4,6 +4,9 @@ import uuid
 import json
 import asyncio
 import httpx
+import os
+import base64
+import tempfile
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.logger import logger
@@ -81,22 +84,47 @@ def normalize_model_name(model: str) -> str:
         return "gemini-2.0-flash" 
     return model
 
-def build_context_prompt(messages: list) -> str:
+def build_context_prompt(messages: list) -> tuple[str, list]:
     """
-    Constructs a single prompt string from the chat history.
+    Constructs a single prompt string from the chat history and extracts any image files.
     """
     prompt_parts = []
+    file_paths = []
+    
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
         if isinstance(content, list):
-             # Handle multimodal content (list of dicts) if present, simplistic approach for now
-             text_content = " ".join([part.get("text", "") for part in content if part.get("type") == "text"])
-             prompt_parts.append(f"{role.capitalize()}: {text_content}")
+            text_parts = []
+            for part in content:
+                if part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+                elif part.get("type") == "image_url":
+                    image_url = part.get("image_url", {}).get("url", "")
+                    if image_url.startswith("data:image"):
+                        try:
+                            # Parse data URI: data:image/[ext];base64,[data]
+                            header, encoded = image_url.split(",", 1)
+                            ext = "png"
+                            if "/" in header and ";" in header:
+                                ext = header.split("/")[1].split(";")[0]
+                            
+                            # Create a temporary file
+                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
+                            with os.fdopen(fd, 'wb') as tmp:
+                                tmp.write(base64.b64decode(encoded))
+                            file_paths.append(path)
+                            if DEBUG_MODE:
+                                logger.debug("Extracted image to temporary file: %s", path)
+                        except Exception as e:
+                            logger.error("Failed to decode base64 image: %s", e)
+            
+            text_content = " ".join(text_parts)
+            prompt_parts.append(f"{role.capitalize()}: {text_content}")
         else:
-             prompt_parts.append(f"{role.capitalize()}: {content}")
+            prompt_parts.append(f"{role.capitalize()}: {content}")
     
-    return "\n\n".join(prompt_parts)
+    return "\n\n".join(prompt_parts), file_paths
 
 async def generate_openai_stream(response_text: str, model: str):
     """
@@ -155,9 +183,11 @@ async def chat_completions(request: OpenAIChatRequest):
         logger.debug("/v1/chat/completions request payload: %s", _serialize_payload(request))
     
     target_model = normalize_model_name(request.model)
-    full_prompt = build_context_prompt(request.messages)
+    full_prompt, extracted_files = build_context_prompt(request.messages)
     if DEBUG_MODE:
         logger.debug("Constructed prompt for Gemini (model=%s): %s", target_model, full_prompt)
+        if extracted_files:
+            logger.debug("Extracted %d file(s) for Gemini", len(extracted_files))
 
     try:
         max_attempts = 2
@@ -170,7 +200,7 @@ async def chat_completions(request: OpenAIChatRequest):
                 response = await gemini_client.generate_content(
                     message=full_prompt,
                     model=target_model,
-                    files=None,
+                    files=extracted_files if extracted_files else None,
                 )
                 break
             except httpx.RemoteProtocolError as transport_exc:
@@ -219,3 +249,14 @@ async def chat_completions(request: OpenAIChatRequest):
     except Exception as e:
         logger.error(f"Error in /v1/chat/completions endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing chat completion: {str(e)}")
+    finally:
+        # Cleanup temporary files
+        if 'extracted_files' in locals() and extracted_files:
+            for file_path in extracted_files:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        if DEBUG_MODE:
+                            logger.debug("Deleted temporary file: %s", file_path)
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to delete temporary file %s: %s", file_path, cleanup_exc)
