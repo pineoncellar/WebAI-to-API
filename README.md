@@ -3,6 +3,11 @@
 > **This project is intended for research and educational purposes only.**  
 > Please refrain from any commercial use and act responsibly when deploying or modifying this tool.
 
+### 🛠️ 技术声明与运行环境
+- **逻辑增强**：代码库的部分模块采用了自动化指令集进行结构优化。鉴于逻辑生成的演进性，使用者应在使用前根据实际需求对核心业务流进行充分验证。
+- **兼容参考**：本分支已针对 **Windows Server 2022** 与 **Microsoft Edge** 的组合进行了调优及稳定性验证。
+- **行为规范**：使用者需独立承担其请求行为的合规性，并严格遵守相关第三方服务的使用细则与当地法律法规。
+
 ---
 
 # WebAI-to-API
@@ -59,6 +64,8 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
     - `/v1/chat/completions`
 
 - 🔄 **Server Switching**: Easily switch between servers in terminal.
+
+- 🖼️ **Multimodal Support**: Support for OpenAI-compatible Base64 image messages in `/v1/chat/completions`.
 
 - 🛠️ **Modular Architecture**: Organized into clearly defined modules for API routes, services, configurations, and utilities, making development and maintenance straightforward.
 
@@ -261,7 +268,7 @@ GET  /images/{filename}             # Retrieve images
 | Section     | Option     | Description                                | Example Value           |
 | ----------- | ---------- | ------------------------------------------ | ----------------------- |
 | [AI]        | default_ai | Default service for `/v1/chat/completions` | `gemini`                |
-| [Browser]   | name       | Browser for cookie-based authentication    | `firefox`               |
+| [Browser]   | name       | Browser for cookie-based authentication    | `edge`                  |
 | [EnabledAI] | gemini     | Enable/disable Gemini service              | `true`                  |
 | [Proxy]     | http_proxy | Proxy for Gemini connections (optional)    | `http://127.0.0.1:2334` |
 
@@ -290,7 +297,7 @@ gemini = true
 
 [Browser]
 # Default browser options: firefox, brave, chrome, edge, safari.
-name = firefox
+name = edge
 
 # --- Proxy Configuration ---
 # Optional proxy for connecting to Gemini servers.
