@@ -9,7 +9,7 @@ from app.logger import logger
 from app.security import verify_api_key
 
 # Import endpoint routers
-from app.endpoints import gemini, chat, google_generative
+from app.endpoints import gemini, chat, google_generative, models
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,3 +43,4 @@ app.add_middleware(
 app.include_router(gemini.router)
 app.include_router(chat.router)
 app.include_router(google_generative.router)
+app.include_router(models.router)
