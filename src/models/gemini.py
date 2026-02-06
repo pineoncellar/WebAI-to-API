@@ -97,7 +97,6 @@ class MyGeminiClient:
             "f.req": json.dumps([None, json.dumps(inner_req_list)])
         }
         
-        # FIX: Try using StreamGenerate instead of StreamGenerate2 based on logs/capture
         url = "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
         
         try:

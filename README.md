@@ -54,8 +54,10 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
   - **WebAI Server**:
 
     - `/v1/chat/completions`
+    - `/v1/models`
     - `/gemini`
     - `/gemini-chat`
+    - `/gemini-image`
     - `/translate`
     - `/v1beta/models/{model}` (Google Generative AI v1beta API)
 
@@ -66,6 +68,8 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
 - 🔄 **Server Switching**: Easily switch between servers in terminal.
 
 - 🖼️ **Multimodal Support**: Support for OpenAI-compatible Base64 image messages in `/v1/chat/completions`.
+
+- 🎨 **Image Generation**: Support for generating images via Gemini models. Images are automatically downloaded, saved locally, and returned as Base64.
 
 - 🛠️ **Modular Architecture**: Organized into clearly defined modules for API routes, services, configurations, and utilities, making development and maintenance straightforward.
 
