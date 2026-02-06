@@ -81,7 +81,7 @@ def convert_to_openai_format(response_text: str, model: str, stream: bool = Fals
 def normalize_model_name(model: str) -> str:
     # If the model is an OpenAI model name, map it to a default Gemini model
     if model.startswith("gpt-") or model.startswith("text-"):
-        return "gemini-2.0-flash" 
+        return "gemini-3.0-flash" 
     return model
 
 def build_context_prompt(messages: list) -> tuple[str, list]:
@@ -161,21 +161,25 @@ async def generate_openai_stream(data_source, model: str):
     else:
         # Real streaming from async generator
         try:
+            last_text_len = 0
             async for chunk in data_source:
-                # content = getattr(chunk, "text", "") # text might be full text
-                # We expect 'text_delta' to be the new content
-                piece = getattr(chunk, "text_delta", None)
-                if piece:
-                    chunk_content = {
-                        "id": request_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_time,
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
-                    }
-                    yield f"data: {json.dumps(chunk_content)}\n\n"
+                # Use total text length to calculate delta, ensuring no duplicates
+                full_text = getattr(chunk, "text", "")
+                if full_text and len(full_text) > last_text_len:
+                    piece = full_text[last_text_len:]
+                    last_text_len = len(full_text)
+                    
+                    if piece:
+                        chunk_content = {
+                            "id": request_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_time,
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(chunk_content)}\n\n"
         except Exception as e:
-            logger.error(f"Error during streaming generation: {e}")
+            logger.error(f"Error during streaming generation: {e}", exc_info=True)
             # Optionally yield an error chunk or just stop
 
     # 3. Send final chunk
