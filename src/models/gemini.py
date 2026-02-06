@@ -27,6 +27,15 @@ class MyGeminiClient:
             logger.debug("Gemini generate_content response text: %s", getattr(response, "text", response))
         return response
 
+    async def generate_content_stream(self, message: str, model: str, files: Optional[List[Union[str, Path]]] = None):
+        """
+        Generate content using the Gemini client with streaming.
+        """
+        if self._debug:
+            logger.debug("Gemini generate_content_stream payload | model=%s | prompt=%s | files=%s", model, message, files)
+        async for chunk in self.client.generate_content_stream(prompt=message, model=model, files=files):
+            yield chunk
+
     async def close(self) -> None:
         """Close the Gemini client."""
         await self.client.close()

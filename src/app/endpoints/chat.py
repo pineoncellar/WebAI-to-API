@@ -126,10 +126,10 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
     
     return "\n\n".join(prompt_parts), file_paths
 
-async def generate_openai_stream(response_text: str, model: str):
+async def generate_openai_stream(data_source, model: str):
     """
     Generator that yields OpenAI-compatible stream chunks.
-    This simulates streaming by splitting the full response.
+    Accepts either a full text string (simulation) or an async generator (real streaming).
     """
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created_time = int(time.time())
@@ -144,21 +144,39 @@ async def generate_openai_stream(response_text: str, model: str):
     }
     yield f"data: {json.dumps(chunk_role)}\n\n"
     
-    # 2. Split text and send chunks (simulating stream)
-    # Split by words or small chunks to make it look like streaming
-    chunk_size = 4 # characters
-    for i in range(0, len(response_text), chunk_size):
-        piece = response_text[i:i+chunk_size]
-        chunk_content = {
-            "id": request_id,
-            "object": "chat.completion.chunk",
-            "created": created_time,
-            "model": model,
-            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
-        }
-        yield f"data: {json.dumps(chunk_content)}\n\n"
-        # Optional: Add tiny delay to simulate network/processing, but better keep it fast for responsiveness
-        # await asyncio.sleep(0.01)
+    # 2. Process data source
+    if isinstance(data_source, str):
+        # Simulate streaming by splitting string
+        chunk_size = 4 # characters
+        for i in range(0, len(data_source), chunk_size):
+            piece = data_source[i:i+chunk_size]
+            chunk_content = {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": model,
+                "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+            }
+            yield f"data: {json.dumps(chunk_content)}\n\n"
+    else:
+        # Real streaming from async generator
+        try:
+            async for chunk in data_source:
+                # content = getattr(chunk, "text", "") # text might be full text
+                # We expect 'text_delta' to be the new content
+                piece = getattr(chunk, "text_delta", None)
+                if piece:
+                    chunk_content = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_time,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                    }
+                    yield f"data: {json.dumps(chunk_content)}\n\n"
+        except Exception as e:
+            logger.error(f"Error during streaming generation: {e}")
+            # Optionally yield an error chunk or just stop
 
     # 3. Send final chunk
     chunk_finish = {
@@ -190,6 +208,20 @@ async def chat_completions(request: OpenAIChatRequest):
             logger.debug("Extracted %d file(s) for Gemini", len(extracted_files))
 
     try:
+        if request.stream:
+            if DEBUG_MODE:
+                logger.debug("Beginning streaming response for /v1/chat/completions")
+            
+            stream_gen = gemini_client.generate_content_stream(
+                message=full_prompt,
+                model=target_model,
+                files=extracted_files if extracted_files else None,
+            )
+            return StreamingResponse(
+                generate_openai_stream(stream_gen, request.model),
+                media_type="text/event-stream"
+            )
+
         max_attempts = 2
         response = None
         last_transport_exc = None
@@ -233,18 +265,10 @@ async def chat_completions(request: OpenAIChatRequest):
         if DEBUG_MODE:
             logger.debug("Raw Gemini response text: %s", response.text)
 
-        if request.stream:
-            if DEBUG_MODE:
-                logger.debug("Returning streaming response for /v1/chat/completions")
-            return StreamingResponse(
-                generate_openai_stream(response.text, request.model),
-                media_type="text/event-stream"
-            )
-        else:
-            openai_response = convert_to_openai_format(response.text, request.model, False)
-            if DEBUG_MODE:
-                logger.debug("OpenAI-formatted response: %s", openai_response)
-            return openai_response
+        openai_response = convert_to_openai_format(response.text, request.model, False)
+        if DEBUG_MODE:
+            logger.debug("OpenAI-formatted response: %s", openai_response)
+        return openai_response
             
     except Exception as e:
         logger.error(f"Error in /v1/chat/completions endpoint: {e}", exc_info=True)
