@@ -1,1 +1,1 @@
-poetry run python src/run.py --host 0.0.0.0
+uv run src/run.py --host 0.0.0.0

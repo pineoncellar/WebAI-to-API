@@ -1,41 +1,37 @@
-# File: pyproject.toml
-
-[tool.poetry]
+[project]
 name = "webai-to-api"
 version = "0.4.0"
 description = "WebAI-to-API is a modular web server built with FastAPI, designed to manage requests across AI services."
-authors = ["Mohammad <m.khani2810@gmail.com>"]
-license = "MIT"
+authors = [
+    { name = "Mohammad", email = "m.khani2810@gmail.com" }
+]
+license = { text = "MIT" }
 readme = "README.md"
-
-packages = [
-    { include = "app", from = "src" },
-    { include = "models", from = "src" },
-    { include = "schemas", from = "src" },
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.7,<0.116.0",
+    "browser-cookie3>=0.20.1,<0.21.0",
+    "httpx>=0.28.1,<0.29.0",
+    "curl-cffi>=0.7.4,<0.8.0",
+    "gemini-webapi>=1.8.3",
+    "uvicorn[standard]>=0.34.0,<0.35.0",
+    "tomli>=2.2.1",
+    "g4f>=0.5.5.6",
+    "python-multipart>=0.0.20",
+    "aiohttp-socks>=0.10.1",
+    "nodriver>=0.46.1",
+    "platformdirs>=4.3.8",
+    "websocket-client>=1.8.0",
+    "pywin32==308 ; sys_platform == 'win32'",
+    "pycryptodomex==3.21.0 ; sys_platform == 'win32'"
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.10,<4.0"
-fastapi = ">=0.115.7,<0.116.0"
-browser-cookie3 = ">=0.20.1,<0.21.0"
-httpx = ">=0.28.1,<0.29.0"
-curl-cffi = ">=0.7.4,<0.8.0"
-gemini-webapi = ">=1.8.3"
-uvicorn = {extras = ["standard"], version = ">=0.34.0,<0.35.0"}
-
-# Windows-specific dependencies for cookie decryption
-# These will only be installed on Windows systems
-pywin32 = { version = "==308", platform = "win32" }
-pycryptodomex = { version = "==3.21.0", platform = "win32" }
-tomli = "^2.2.1"
-g4f = "^0.5.5.6"
-python-multipart = "^0.0.20"
-aiohttp-socks = "^0.10.1"
-nodriver = "^0.46.1"
-platformdirs = "^4.3.8"
-websocket-client = "^1.8.0"
-
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app", "src/models", "src/schemas"]
+
+[tool.uv]
+package = true
