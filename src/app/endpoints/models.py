@@ -1,8 +1,8 @@
 # src/app/endpoints/models.py
 import time
-import re
 import asyncio
 from fastapi import APIRouter
+from gemini_webapi.constants import Model as GeminiModel
 from app.logger import logger
 from app.services.gemini_client import get_gemini_client
 
@@ -15,8 +15,7 @@ _CACHE_TTL = 3600  # Refresh every hour in case new models appear
 
 async def _discover_gemini_models():
     """
-    Dynamically discovers available models by triggering a specific error
-    in the underlying library which lists valid models.
+    Dynamically lists available models by reading from the underlying library constants.
     """
     global _CACHED_MODELS, _CACHE_TIMESTAMP
     
@@ -36,29 +35,20 @@ async def _discover_gemini_models():
         ]
 
     try:
-        # Intentionally request an invalid model to trigger the validation error
-        # which contains the list of available models.
-        # We assume the library raises ValueError or similar with the list.
-        await client.generate_content("test", model="FORCE_MODEL_DISCOVERY_HACK")
-    except Exception as e:
-        error_str = str(e)
-        # Look for pattern: "Available models: unspecified, model1, model2, ..."
-        # Example error: ValueError: Unknown model name: ... Available models: unspecified, gemini-3.0-pro, ...
-        match = re.search(r"Available models:\s*(.+)", error_str)
-        if match:
-            models_str = match.group(1)
-            # Split by comma and clean up
-            models_list = [m.strip() for m in models_str.split(",")]
-            # Filter out 'unspecified' and empty strings
-            valid_models = [m for m in models_list if m and m.lower() != "unspecified"]
+        # Check constants directly from the library instead of triggering an error
+        valid_models = [
+            m.model_name for m in GeminiModel 
+            if m.model_name and m.model_name.lower() != "unspecified"
+        ]
+
+        if valid_models:
+            logger.debug(f"Dynamically discovered models from library: {valid_models}")
+            _CACHED_MODELS = valid_models
+            _CACHE_TIMESTAMP = current_time
+            return valid_models
             
-            if valid_models:
-                logger.info(f"Dynamically discovered models: {valid_models}")
-                _CACHED_MODELS = valid_models
-                _CACHE_TIMESTAMP = current_time
-                return valid_models
-        else:
-            logger.warning(f"Could not parse 'Available models' from error: {error_str}")
+    except Exception as e:
+        logger.warning(f"Failed to extract models from library constants: {e}")
 
     # Fallback if discovery fails
     logger.warning("Model discovery failed, using hardcoded fallback")
