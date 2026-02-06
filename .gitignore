@@ -10,3 +10,6 @@ har_and_cookies
 
 # debug logs
 logs/
+
+# generated images
+assets/generated_images/

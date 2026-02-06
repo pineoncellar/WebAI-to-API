@@ -54,3 +54,35 @@ async def gemini_chat(request: GeminiRequest):
     except Exception as e:
         logger.error(f"Error in /gemini-chat endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error in chat: {str(e)}")
+
+@router.post("/gemini-image")
+async def gemini_image(request: GeminiRequest):
+    """
+    Experimental endpoint for image generation using Gemini's internal tool (Nano Banana).
+    """
+    gemini_client = get_gemini_client()
+    if not gemini_client:
+        raise HTTPException(status_code=503, detail="Gemini client is not initialized.")
+    if DEBUG_MODE:
+        logger.debug("/gemini-image request payload: %s", _serialize_payload(request))
+    
+    try:
+        # Check if the method works, it uses internal state of the client
+        result = await gemini_client.generate_image(request.message)
+        
+        if result and result.get("url"):
+            resp_data = {
+                # "url": result["url"], 
+                # "response": f"Image generated: {result['url']}",
+                "local_path": result.get("local_path")
+            }
+            if result.get("base64"):
+                resp_data["base64"] = result["base64"]
+            return resp_data
+        else:
+            raise HTTPException(status_code=424, detail="Failed to generate image. Please checking logs or your account permissions.")
+
+    except Exception as e:
+        logger.error(f"Error in /gemini-image endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating image: {str(e)}")
+
