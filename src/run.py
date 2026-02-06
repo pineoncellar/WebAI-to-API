@@ -60,6 +60,15 @@ def get_app_info() -> Tuple[str, str]:
     try:
         with open("pyproject.toml", "rb") as f:
             toml_data = tomli.load(f)
+        
+        # Try finding in [project] first (PEP 621 standard, used by uv, hatch, flit, etc.)
+        project_data = toml_data.get("project")
+        if project_data:
+            name = project_data.get("name", "WebAI-to-API").replace("-", " ").title()
+            version = project_data.get("version", "N/A")
+            return name, version
+
+        # Fallback to [tool.poetry]
         poetry_data = toml_data.get("tool", {}).get("poetry", {})
         name = poetry_data.get("name", "WebAI-to-API").replace("-", " ").title()
         version = poetry_data.get("version", "N/A")
