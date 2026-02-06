@@ -17,6 +17,8 @@ class GeminiModels(str, Enum):
     
     # Gemini 3.0 Series
     PRO_3_0 = "gemini-3.0-pro"
+    FLASH_3_0 = "gemini-3.0-flash"
+    FLASH_THINKING_3_0 = "gemini-3.0-flash-thinking"
 
     # Gemini 2.5 Series
     PRO_2_5 = "gemini-2.5-pro"
