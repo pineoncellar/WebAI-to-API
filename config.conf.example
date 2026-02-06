@@ -9,6 +9,11 @@
 # Supported options: chrome, firefox, brave, edge, safari
 [Browser]
 name = chrome
+# Specify the browser profile name if you have multiple accounts/profiles.
+# Windows paths relate to "User Data" folder names.
+# Common values: Default, Profile 1, Profile 2, etc.
+# Check browser settings (e.g., chrome://version) to find your current "Profile Path".
+profile = Default
 
 # --- AI Provider Settings ---
 # Select the default AI service.

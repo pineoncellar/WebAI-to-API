@@ -48,7 +48,7 @@ class CrossPlatformCookieExtractor:
         self.is_windows = self.system == "windows"
         logger.info(f"Initialized cookie extractor for {self.system}")
     
-    def _get_browser_profile_paths(self, browser_name: str) -> Dict[str, Any]:
+    def _get_browser_profile_paths(self, browser_name: str, profile: str = "Default") -> Dict[str, Any]:
         """Get browser profile paths for different operating systems"""
         paths = {}
         
@@ -58,63 +58,63 @@ class CrossPlatformCookieExtractor:
                 base_path = os.path.join(user_data, "AppData", "Local", "Google", "Chrome", "User Data")
                 # Check multiple possible locations for Chrome cookies
                 possible_paths = [
-                    os.path.join(base_path, "Default", "Network", "Cookies"),  # New Chrome location
-                    os.path.join(base_path, "Default", "Cookies"),  # Old Chrome location
+                    os.path.join(base_path, profile, "Network", "Cookies"),  # New Chrome location
+                    os.path.join(base_path, profile, "Cookies"),  # Old Chrome location
                 ]
                 cookies_path = None
                 for path in possible_paths:
                     if os.path.exists(path):
                         cookies_path = path
-                        logger.info(f"Found Chrome cookies at: {path}")
+                        logger.info(f"Found Chrome cookies in profile '{profile}' at: {path}")
                         break
                 
                 paths = {
                     "cookies_db": cookies_path,
                     "local_state": os.path.join(base_path, "Local State"),
                     "user_data_dir": base_path,
-                    "profile_directory": "Default",
+                    "profile_directory": profile,
                 }
                 
             elif browser_name == "brave":
                 base_path = os.path.join(user_data, "AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")
                 # Check multiple possible locations for Brave cookies
                 possible_paths = [
-                    os.path.join(base_path, "Default", "Network", "Cookies"),  # New Brave location
-                    os.path.join(base_path, "Default", "Cookies"),  # Old Brave location
+                    os.path.join(base_path, profile, "Network", "Cookies"),  # New Brave location
+                    os.path.join(base_path, profile, "Cookies"),  # Old Brave location
                 ]
                 cookies_path = None
                 for path in possible_paths:
                     if os.path.exists(path):
                         cookies_path = path
-                        logger.info(f"Found Brave cookies at: {path}")
+                        logger.info(f"Found Brave cookies in profile '{profile}' at: {path}")
                         break
                 
                 paths = {
                     "cookies_db": cookies_path,
                     "local_state": os.path.join(base_path, "Local State"),
                     "user_data_dir": base_path,
-                    "profile_directory": "Default",
+                    "profile_directory": profile,
                 }
                 
             elif browser_name == "edge":
                 base_path = os.path.join(user_data, "AppData", "Local", "Microsoft", "Edge", "User Data")
                 # Check multiple possible locations for Edge cookies
                 possible_paths = [
-                    os.path.join(base_path, "Default", "Network", "Cookies"),  # New Edge location
-                    os.path.join(base_path, "Default", "Cookies"),  # Old Edge location
+                    os.path.join(base_path, profile, "Network", "Cookies"),  # New Edge location
+                    os.path.join(base_path, profile, "Cookies"),  # Old Edge location
                 ]
                 cookies_path = None
                 for path in possible_paths:
                     if os.path.exists(path):
                         cookies_path = path
-                        logger.info(f"Found Edge cookies at: {path}")
+                        logger.info(f"Found Edge cookies in profile '{profile}' at: {path}")
                         break
                 
                 paths = {
                     "cookies_db": cookies_path,
                     "local_state": os.path.join(base_path, "Local State"),
                     "user_data_dir": base_path,
-                    "profile_directory": "Default",
+                    "profile_directory": profile,
                 }
                 
             elif browser_name == "firefox":
@@ -176,16 +176,16 @@ class CrossPlatformCookieExtractor:
         logger.warning(f"Executable for {browser_name} not found in standard locations")
         return None
 
-    def _get_chromium_cookies_via_devtools(self, browser_name: str) -> Optional[list]:
+    def _get_chromium_cookies_via_devtools(self, browser_name: str, profile: str = "Default") -> Optional[list]:
         """Leverage Chromium DevTools protocol to fetch decrypted cookies."""
         if not (self.is_windows and HAS_WEBSOCKET):
             if self.is_windows and not HAS_WEBSOCKET:
                 logger.debug("websocket-client not available; skipping DevTools extraction")
             return None
 
-        browser_paths = self._get_browser_profile_paths(browser_name)
+        browser_paths = self._get_browser_profile_paths(browser_name, profile=profile)
         user_data_dir = browser_paths.get("user_data_dir")
-        profile_directory = browser_paths.get("profile_directory", "Default")
+        profile_directory = browser_paths.get("profile_directory", profile)
         executable_path = self._find_browser_executable(browser_name)
 
         if not executable_path or not user_data_dir:
@@ -586,21 +586,22 @@ class CrossPlatformCookieExtractor:
                 except OSError:
                     pass
     
-    def get_cookies_with_fallback(self, browser_name: str) -> Optional[Any]:
+    def get_cookies_with_fallback(self, browser_name: str, profile: str = "Default") -> Optional[Any]:
         """Get cookies with multiple fallback methods"""
-        logger.info(f"Attempting to get cookies from {browser_name} with fallback methods")
+        logger.info(f"Attempting to get cookies from {browser_name} (profile: {profile}) with fallback methods")
         
-        # Method 1: Try browser_cookie3 first (works well on Linux)
-        cookies = self._try_browser_cookie3(browser_name)
-        if cookies:
-            logger.info(f"Successfully retrieved cookies using browser_cookie3 for {browser_name}")
-            return cookies
+        # Method 1: Try browser_cookie3 first (works well on Linux, but doesn't support profiles easily)
+        if profile == "Default":
+            cookies = self._try_browser_cookie3(browser_name)
+            if cookies:
+                logger.info(f"Successfully retrieved cookies using browser_cookie3 for {browser_name}")
+                return cookies
         
         # Method 2: Try direct database access (fallback for Windows)
         if self.is_windows:
-            logger.info(f"Trying direct database access for {browser_name} on Windows")
+            logger.info(f"Trying direct database access for {browser_name} profile '{profile}' on Windows")
             
-            browser_paths = self._get_browser_profile_paths(browser_name)
+            browser_paths = self._get_browser_profile_paths(browser_name, profile=profile)
             
             if browser_name == "firefox" and "cookies_db" in browser_paths:
                 cookies = self._get_firefox_cookies_direct(browser_paths["cookies_db"])
@@ -618,15 +619,15 @@ class CrossPlatformCookieExtractor:
                         logger.info(f"Successfully retrieved {browser_name} cookies via direct access")
                         return cookies
                 else:
-                    logger.warning(f"Cookies database not found for {browser_name} at expected locations")
+                    logger.warning(f"Cookies database not found for {browser_name} profile '{profile}' at {cookies_db_path}")
 
-                logger.info(f"Attempting DevTools-based extraction for {browser_name}")
-                cookies = self._get_chromium_cookies_via_devtools(browser_name)
+                logger.info(f"Attempting DevTools-based extraction for {browser_name} profile '{profile}'")
+                cookies = self._get_chromium_cookies_via_devtools(browser_name, profile=profile)
                 if cookies:
                     logger.info(f"Successfully retrieved {browser_name} cookies via DevTools protocol")
                     return cookies
                 else:
-                    logger.warning(f"DevTools extraction failed for {browser_name}")
+                    logger.warning(f"DevTools extraction failed for {browser_name} profile '{profile}'")
         
         logger.warning(f"All cookie extraction methods failed for {browser_name}")
         return None
@@ -635,18 +636,19 @@ class CrossPlatformCookieExtractor:
 def get_cookie_from_browser(service: Literal["gemini"]) -> Optional[tuple]:
     """Enhanced cookie extraction with cross-platform support"""
     browser_name = CONFIG["Browser"].get("name", "firefox").lower()
-    logger.info(f"Attempting to get cookies from browser: {browser_name} for service: {service}")
+    profile = CONFIG["Browser"].get("profile", "Default")
+    logger.info(f"Attempting to get cookies from browser: {browser_name} (profile: {profile}) for service: {service}")
     
     extractor = CrossPlatformCookieExtractor()
     
     try:
-        cookies = extractor.get_cookies_with_fallback(browser_name)
+        cookies = extractor.get_cookies_with_fallback(browser_name, profile=profile)
         
         if not cookies:
-            logger.error(f"Failed to retrieve cookies from {browser_name}")
+            logger.error(f"Failed to retrieve cookies from {browser_name} (profile: {profile})")
             return None
         
-        logger.info(f"Successfully retrieved cookies from {browser_name}")
+        logger.info(f"Successfully retrieved cookies from {browser_name} (profile: {profile})")
         
     except Exception as e:
         logger.error(f"An unexpected error occurred while retrieving cookies from {browser_name}: {e}", exc_info=True)
