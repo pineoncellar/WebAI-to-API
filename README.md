@@ -88,10 +88,10 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
    cd WebAI-to-API
    ```
 
-2. **Install dependencies using Poetry:**
+2. **Install dependencies using uv:**
 
    ```bash
-   poetry install
+   uv sync
    ```
 
 3. **Create and update the configuration file:**
@@ -105,7 +105,7 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
 4. **Run the server:**
 
    ```bash
-   poetry run python src/run.py
+   uv run src/run.py
    ```
 
 ---
@@ -375,12 +375,6 @@ The project is built on a modular architecture designed for scalability and ease
 
 4. **Utilities and Configurations:**  
    Helper functions and configuration logic are kept separate to maintain clarity and ease of updates.
-
----
-
-## 🐳 Docker Deployment Guide
-
-For Docker setup and deployment instructions, please refer to the [Docker.md](Docker.md) documentation.
 
 ---
 
