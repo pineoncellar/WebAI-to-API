@@ -20,6 +20,8 @@ if DEBUG_MODE:
 
 logging.basicConfig(level=logging.DEBUG if DEBUG_MODE else logging.INFO, format=LOG_FORMAT, handlers=handlers, force=True)
 
+logging.getLogger("hpack.hpack").setLevel(logging.INFO)
+
 logger = logging.getLogger("app")
 logger.setLevel(logging.DEBUG if DEBUG_MODE else logging.INFO)
 
