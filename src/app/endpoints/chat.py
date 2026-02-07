@@ -44,15 +44,32 @@ async def translate_chat(request: GeminiRequest):
         logger.error(f"Error in /translate endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error during translation: {str(e)}")
 
-def convert_to_openai_format(response_text: str, model: str, stream: bool = False):
+def convert_to_openai_format(response_text: str, model: str, stream: bool = False, reasoning_content: str = None):
     import uuid
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created_time = int(time.time())
     
     # Calculate crude token counts (approximation: 1 token ~= 4 chars)
     completion_tokens = len(response_text) // 4
+    if reasoning_content:
+        completion_tokens += len(reasoning_content) // 4
+        
     prompt_tokens = 0 # We don't have easy access to input length here without passing it in
     total_tokens = completion_tokens + prompt_tokens
+
+    choice_data = {
+        "index": 0,
+        "message": {
+            "role": "assistant",
+            "content": response_text,
+        },
+        "logprobs": None,
+        "finish_reason": "stop",
+    }
+    
+    # Add reasoning_content if present (supported by some clients for thought display)
+    if reasoning_content:
+        choice_data["message"]["reasoning_content"] = reasoning_content
 
     return {
         "id": request_id,
@@ -60,15 +77,7 @@ def convert_to_openai_format(response_text: str, model: str, stream: bool = Fals
         "created": created_time,
         "model": model,
         "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": response_text,
-                },
-                "logprobs": None,
-                "finish_reason": "stop",
-            }
+            choice_data
         ],
         "usage": {
             "prompt_tokens": prompt_tokens,
@@ -162,7 +171,26 @@ async def generate_openai_stream(data_source, model: str):
         # Real streaming from async generator
         try:
             last_text_len = 0
+            last_thought_len = 0
+            
             async for chunk in data_source:
+                # 1. Handle Thoughts (Reasoning Content)
+                full_thoughts = getattr(chunk, "thoughts", "")
+                if full_thoughts and len(full_thoughts) > last_thought_len:
+                    piece = full_thoughts[last_thought_len:]
+                    last_thought_len = len(full_thoughts)
+                    
+                    if piece:
+                        chunk_thought = {
+                            "id": request_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_time,
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(chunk_thought)}\n\n"
+
+                # 2. Handle Text Content
                 # Use total text length to calculate delta, ensuring no duplicates
                 full_text = getattr(chunk, "text", "")
                 if full_text and len(full_text) > last_text_len:
@@ -269,7 +297,12 @@ async def chat_completions(request: OpenAIChatRequest):
         if DEBUG_MODE:
             logger.debug("Raw Gemini response text: %s", response.text)
 
-        openai_response = convert_to_openai_format(response.text, request.model, False)
+        # Extract reasoning content/thoughts if available
+        reasoning_content = getattr(response, "thoughts", None)
+        if DEBUG_MODE and reasoning_content:
+             logger.debug("Raw Gemini response thoughts: %s", reasoning_content)
+
+        openai_response = convert_to_openai_format(response.text, request.model, False, reasoning_content)
         if DEBUG_MODE:
             logger.debug("OpenAI-formatted response: %s", openai_response)
         return openai_response
