@@ -22,7 +22,8 @@ class MyGeminiClient:
 
     async def init(self) -> None:
         """Initialize the Gemini client."""
-        await self.client.init(timeout=10)
+        # Increase timeout for file uploads and long responses
+        await self.client.init(timeout=120)
 
     async def generate_content(self, message: str, model: str, files: Optional[List[Union[str, Path]]] = None):
         """

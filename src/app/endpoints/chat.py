@@ -7,6 +7,7 @@ import httpx
 import os
 import base64
 import tempfile
+import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -111,14 +112,43 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                     text_parts.append(part.get("text", ""))
                 elif part.get("type") == "image_url":
                     image_url = part.get("image_url", {}).get("url", "")
-                    if image_url.startswith("data:image"):
+                    if image_url.startswith("data:"):
                         try:
-                            # Parse data URI: data:image/[ext];base64,[data]
+                            # Parse data URI: data:[mime];base64,[data]
                             header, encoded = image_url.split(",", 1)
-                            ext = "png"
-                            if "/" in header and ";" in header:
-                                ext = header.split("/")[1].split(";")[0]
                             
+                            # Determine extension
+                            ext = "bin"
+                            if ":" in header and ";" in header:
+                                mime_type = header.split(":")[1].split(";")[0]
+                                
+                                # Common manual overrides for complex mime types
+                                mime_map = {
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                                    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                                    "application/msword": "doc",
+                                    "application/vnd.ms-excel": "xls",
+                                    "application/vnd.ms-powerpoint": "ppt",
+                                    "text/plain": "txt",
+                                    "text/csv": "csv",
+                                    "application/pdf": "pdf",
+                                    "application/json": "json"
+                                }
+                                
+                                if mime_type in mime_map:
+                                    ext = mime_map[mime_type]
+                                else:
+                                    # Attempt to guess extension from mime type
+                                    guessed_ext = mimetypes.guess_extension(mime_type)
+                                    if guessed_ext:
+                                        ext = guessed_ext.lstrip(".")
+                                    elif "/" in mime_type:
+                                        # Fallback: use subtype as extension, but ensure it's reasonable length
+                                        subtype = mime_type.split("/")[1]
+                                        if len(subtype) < 10 and subtype.isalnum():
+                                            ext = subtype
+
                             # Create a temporary file
                             project_root = Path(__file__).parents[3]
                             temp_dir = project_root / "temp"
@@ -129,9 +159,9 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                                 tmp.write(base64.b64decode(encoded))
                             file_paths.append(path)
                             if DEBUG_MODE:
-                                logger.debug("Extracted image to temporary file: %s", path)
+                                logger.debug("Extracted file to temporary file: %s (mime: %s)", path, ext)
                         except Exception as e:
-                            logger.error("Failed to decode base64 image: %s", e)
+                            logger.error("Failed to decode base64 file data: %s", e)
             
             text_content = " ".join(text_parts)
             prompt_parts.append(f"{role.capitalize()}: {text_content}")
