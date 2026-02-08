@@ -143,7 +143,7 @@ class MyGeminiClient:
                         img_data = img_resp.content
                         
                         # Ensure assets/generated_images exists
-                        save_dir = Path("assets/generated_images")
+                        save_dir = Path("temp/generated_images")
                         save_dir.mkdir(parents=True, exist_ok=True)
                         
                         timestamp = int(time.time() * 1000)
