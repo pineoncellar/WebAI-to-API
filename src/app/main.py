@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.gemini_client import get_gemini_client
 from app.services.session_manager import init_session_managers
-from app.logger import logger
+from app.logger import logger, setup_logging_file
 from app.security import verify_api_key
 
 # Import endpoint routers
@@ -17,6 +17,9 @@ async def lifespan(app: FastAPI):
     Application lifespan manager.
     Initializes services on startup.
     """
+    # Initialize file logging for the server process
+    setup_logging_file()
+
     # Initialization logic is handled by the `run.py` script before the app starts.
     # We only initialize session managers here if the client was created successfully.
     if get_gemini_client():
