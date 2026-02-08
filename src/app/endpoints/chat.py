@@ -7,6 +7,7 @@ import httpx
 import os
 import base64
 import tempfile
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.logger import logger
@@ -119,7 +120,11 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                                 ext = header.split("/")[1].split(";")[0]
                             
                             # Create a temporary file
-                            fd, path = tempfile.mkstemp(suffix=f".{ext}")
+                            project_root = Path(__file__).parents[3]
+                            temp_dir = project_root / "temp"
+                            temp_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            fd, path = tempfile.mkstemp(suffix=f".{ext}", dir=str(temp_dir))
                             with os.fdopen(fd, 'wb') as tmp:
                                 tmp.write(base64.b64decode(encoded))
                             file_paths.append(path)
@@ -135,91 +140,106 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
     
     return "\n\n".join(prompt_parts), file_paths
 
-async def generate_openai_stream(data_source, model: str):
+async def generate_openai_stream(data_source, model: str, cleanup_files: list = None):
     """
     Generator that yields OpenAI-compatible stream chunks.
     Accepts either a full text string (simulation) or an async generator (real streaming).
     """
-    request_id = f"chatcmpl-{uuid.uuid4()}"
-    created_time = int(time.time())
-    
-    # 1. Send initial chunk with role
-    chunk_role = {
-        "id": request_id,
-        "object": "chat.completion.chunk",
-        "created": created_time,
-        "model": model,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
-    }
-    yield f"data: {json.dumps(chunk_role)}\n\n"
-    
-    # 2. Process data source
-    if isinstance(data_source, str):
-        # Simulate streaming by splitting string
-        chunk_size = 4 # characters
-        for i in range(0, len(data_source), chunk_size):
-            piece = data_source[i:i+chunk_size]
-            chunk_content = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": created_time,
-                "model": model,
-                "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
-            }
-            yield f"data: {json.dumps(chunk_content)}\n\n"
-    else:
-        # Real streaming from async generator
-        try:
-            last_text_len = 0
-            last_thought_len = 0
-            
-            async for chunk in data_source:
-                # 1. Handle Thoughts (Reasoning Content)
-                full_thoughts = getattr(chunk, "thoughts", "")
-                if full_thoughts and len(full_thoughts) > last_thought_len:
-                    piece = full_thoughts[last_thought_len:]
-                    last_thought_len = len(full_thoughts)
-                    
-                    if piece:
-                        chunk_thought = {
-                            "id": request_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_time,
-                            "model": model,
-                            "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
-                        }
-                        yield f"data: {json.dumps(chunk_thought)}\n\n"
+    try:
+        request_id = f"chatcmpl-{uuid.uuid4()}"
+        created_time = int(time.time())
+        
+        # 1. Send initial chunk with role
+        chunk_role = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created_time,
+            "model": model,
+            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
+        }
+        yield f"data: {json.dumps(chunk_role)}\n\n"
+        
+        # 2. Process data source
+        if isinstance(data_source, str):
+            # Simulate streaming by splitting string
+            chunk_size = 4 # characters
+            for i in range(0, len(data_source), chunk_size):
+                piece = data_source[i:i+chunk_size]
+                chunk_content = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_time,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                }
+                yield f"data: {json.dumps(chunk_content)}\n\n"
+        else:
+            # Real streaming from async generator
+            try:
+                last_text_len = 0
+                last_thought_len = 0
+                
+                async for chunk in data_source:
+                    # 1. Handle Thoughts (Reasoning Content)
+                    full_thoughts = getattr(chunk, "thoughts", "")
+                    if full_thoughts and len(full_thoughts) > last_thought_len:
+                        piece = full_thoughts[last_thought_len:]
+                        last_thought_len = len(full_thoughts)
+                        
+                        if piece:
+                            chunk_thought = {
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
+                            }
+                            yield f"data: {json.dumps(chunk_thought)}\n\n"
 
-                # 2. Handle Text Content
-                # Use total text length to calculate delta, ensuring no duplicates
-                full_text = getattr(chunk, "text", "")
-                if full_text and len(full_text) > last_text_len:
-                    piece = full_text[last_text_len:]
-                    last_text_len = len(full_text)
-                    
-                    if piece:
-                        chunk_content = {
-                            "id": request_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_time,
-                            "model": model,
-                            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
-                        }
-                        yield f"data: {json.dumps(chunk_content)}\n\n"
-        except Exception as e:
-            logger.error(f"Error during streaming generation: {e}", exc_info=True)
-            # Optionally yield an error chunk or just stop
+                    # 2. Handle Text Content
+                    # Use total text length to calculate delta, ensuring no duplicates
+                    full_text = getattr(chunk, "text", "")
+                    if full_text and len(full_text) > last_text_len:
+                        piece = full_text[last_text_len:]
+                        last_text_len = len(full_text)
+                        
+                        if piece:
+                            chunk_content = {
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                            }
+                            yield f"data: {json.dumps(chunk_content)}\n\n"
+            except Exception as e:
+                logger.error(f"Error during streaming generation: {e}", exc_info=True)
+                # Optionally yield an error chunk or just stop
 
-    # 3. Send final chunk
-    chunk_finish = {
-        "id": request_id,
-        "object": "chat.completion.chunk",
-        "created": created_time,
-        "model": model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-    }
-    yield f"data: {json.dumps(chunk_finish)}\n\n"
-    yield "data: [DONE]\n\n"
+        # 3. Send final chunk
+        chunk_finish = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created_time,
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+        }
+        yield f"data: {json.dumps(chunk_finish)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    finally:
+        # Cleanup temporary files after streaming is done
+        if cleanup_files:
+            for file_path in cleanup_files:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        if DEBUG_MODE:
+                            logger.debug("Deleted temporary file (stream cleanup): %s", file_path)
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to delete temporary file %s: %s", file_path, cleanup_exc)
+
+
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: OpenAIChatRequest):
@@ -250,7 +270,7 @@ async def chat_completions(request: OpenAIChatRequest):
                 files=extracted_files if extracted_files else None,
             )
             return StreamingResponse(
-                generate_openai_stream(stream_gen, request.model),
+                generate_openai_stream(stream_gen, request.model, cleanup_files=extracted_files),
                 media_type="text/event-stream"
             )
 
@@ -312,7 +332,8 @@ async def chat_completions(request: OpenAIChatRequest):
         raise HTTPException(status_code=500, detail=f"Error processing chat completion: {str(e)}")
     finally:
         # Cleanup temporary files
-        if 'extracted_files' in locals() and extracted_files:
+        # NOTE: If streaming, extracted_files are cleaned up in generate_openai_stream
+        if 'extracted_files' in locals() and extracted_files and not request.stream:
             for file_path in extracted_files:
                 try:
                     if os.path.exists(file_path):
