@@ -163,6 +163,25 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                                 logger.debug("Extracted file to temporary file: %s (mime: %s)", path, ext)
                         except Exception as e:
                             logger.error("Failed to decode base64 file data: %s", e)
+
+                elif part.get("type") == "file_path":
+                    # Handle local file paths
+                    # User requested format: { "type": "file_path", "file_path": { "path": "xxxxx" } }
+                    file_url_obj = part.get("file_path", {})
+                    # We look for "path" inside "file_path"
+                    local_path = file_url_obj.get("path")
+                    
+                    if local_path:
+                        path_obj = Path(local_path)
+
+                        if path_obj.exists() and path_obj.is_file():
+                            file_paths.append(str(path_obj))
+                            if DEBUG_MODE:
+                                logger.debug("Added local file to context: %s", local_path)
+                        else:
+                            error_msg = f"File path provided in file_path does not exist: {local_path}"
+                            logger.error(error_msg)
+                            raise HTTPException(status_code=400, detail=error_msg)
             
             text_content = " ".join(text_parts)
             prompt_parts.append(f"{role.capitalize()}: {text_content}")
