@@ -67,7 +67,9 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
 
 - 🔄 **Server Switching**: Easily switch between servers in terminal.
 
-- 🖼️ **Multimodal Support**: Support for OpenAI-compatible Base64 image messages in `/v1/chat/completions`.
+- 🖼️ **Multimodal Support**:
+  - **Images**: Support for OpenAI-compatible Base64 image messages in `/v1/chat/completions`.
+  - **Files**: Support for local file paths via `{ "type": "file_path", "file_path": { "path": "..." } }` format in `/v1/chat/completions`.
 
 - 🎨 **Image Generation**: Support for generating images via Gemini models. Images are automatically downloaded, saved locally, and returned as Base64.
 
@@ -116,10 +118,56 @@ Send a POST request to `/v1/chat/completions` (or any other available endpoint) 
 
 ### Example Request
 
+**Basic Text Request:**
+
 ```json
 {
   "model": "gemini-3.0-pro",
   "messages": [{ "role": "user", "content": "Hello!" }]
+}
+```
+
+**Image Request (Base64):**
+
+```json
+{
+  "model": "gemini-3.0-pro",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Describe this image" },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,....." 
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Local File Request:**
+
+```json
+{
+  "model": "gemini-3.0-pro",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Summarize this document" },
+        { 
+          "type": "file_path", 
+          "file_path": { 
+            "path": "C:\\path\\to\\your\\document.pdf" 
+          } 
+        }
+      ]
+    }
+  ]
 }
 ```
 
