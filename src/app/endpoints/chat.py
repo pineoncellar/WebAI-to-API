@@ -124,16 +124,12 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                                 
                                 # Common manual overrides for complex mime types
                                 mime_map = {
-                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-                                    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-                                    "application/msword": "doc",
-                                    "application/vnd.ms-excel": "xls",
-                                    "application/vnd.ms-powerpoint": "ppt",
-                                    "text/plain": "txt",
-                                    "text/csv": "csv",
-                                    "application/pdf": "pdf",
-                                    "application/json": "json"
+                                    "image/jpeg": "jpg",
+                                    "image/png": "png",
+                                    "image/gif": "gif",
+                                    "image/webp": "webp",
+                                    "image/bmp": "bmp",
+                                    "image/tiff": "tiff",
                                 }
                                 
                                 if mime_type in mime_map:
@@ -148,6 +144,11 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                                         subtype = mime_type.split("/")[1]
                                         if len(subtype) < 10 and subtype.isalnum():
                                             ext = subtype
+                                
+                                # Only allow image mime types for image_url
+                                if not mime_type.startswith("image/"):
+                                    logger.warning(f"Unsupported non-image mime type in image_url: {mime_type}. Skipping.")
+                                    continue
 
                             # Create a temporary file
                             project_root = Path(__file__).parents[3]
