@@ -124,6 +124,28 @@ class CrossPlatformCookieExtractor:
                     if profiles:
                         profile_path = os.path.join(firefox_path, profiles[0])
                         paths = {"cookies_db": os.path.join(profile_path, "cookies.sqlite")}
+
+        # Linux Support
+        elif self.system == "linux":
+            home = os.path.expanduser("~")
+            if browser_name == "chrome":
+                base_path = os.path.join(home, ".config", "google-chrome")
+                paths = {
+                    "cookies_db": os.path.join(base_path, profile, "Cookies"), # Often in Default/Cookies
+                    "user_data_dir": base_path,
+                    "profile_directory": profile,
+                }
+            elif browser_name == "brave":
+                 base_path = os.path.join(home, ".config", "BraveSoftware", "Brave-Browser")
+                 paths = {
+                    "cookies_db": os.path.join(base_path, profile, "Cookies"),
+                    "user_data_dir": base_path,
+                    "profile_directory": profile,
+                }
+            elif browser_name == "firefox":
+                 # Firefox is trickier as profiles have random strings in names
+                 base_path = os.path.join(home, ".mozilla", "firefox")
+                 pass 
         
         return paths
 
@@ -134,8 +156,24 @@ class CrossPlatformCookieExtractor:
             return sock.getsockname()[1]
 
     def _find_browser_executable(self, browser_name: str) -> Optional[str]:
-        """Locate the browser executable on Windows."""
+        """Locate the browser executable on Windows and Linux."""
         if not self.is_windows:
+            # Linux executable names mapping
+            linux_names = {
+                "chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+                "edge": ["microsoft-edge", "microsoft-edge-stable", "microsoft-edge-dev"],
+                "brave": ["brave-browser", "brave"],
+                "firefox": ["firefox"]
+            }
+            
+            # Check mapped names first
+            if browser_name in linux_names:
+                for name in linux_names[browser_name]:
+                    path = shutil.which(name)
+                    if path:
+                        return path
+            
+            # Fallback to direct name check
             return shutil.which(browser_name)
 
         candidates = []
