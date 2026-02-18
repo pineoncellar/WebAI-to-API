@@ -95,12 +95,14 @@ def normalize_model_name(model: str) -> str:
         return "gemini-3.0-flash" 
     return model
 
-def build_context_prompt(messages: list) -> tuple[str, list]:
+def build_context_prompt(messages: list) -> tuple[str, list, list]:
     """
     Constructs a single prompt string from the chat history and extracts any image files.
+    Returns: prompt_string, all_file_paths, temp_files_to_cleanup
     """
     prompt_parts = []
     file_paths = []
+    cleanup_files = []
     
     for msg in messages:
         role = msg.get("role", "user")
@@ -159,6 +161,7 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
                             with os.fdopen(fd, 'wb') as tmp:
                                 tmp.write(base64.b64decode(encoded))
                             file_paths.append(path)
+                            cleanup_files.append(path)
                             if DEBUG_MODE:
                                 logger.debug("Extracted file to temporary file: %s (mime: %s)", path, ext)
                         except Exception as e:
@@ -188,7 +191,7 @@ def build_context_prompt(messages: list) -> tuple[str, list]:
         else:
             prompt_parts.append(f"{role.capitalize()}: {content}")
     
-    return "\n\n".join(prompt_parts), file_paths
+    return "\n\n".join(prompt_parts), file_paths, cleanup_files
 
 async def generate_openai_stream(data_source, model: str, cleanup_files: list = None):
     """
@@ -303,7 +306,7 @@ async def chat_completions(request: OpenAIChatRequest):
         logger.debug("/v1/chat/completions request payload: %s", _serialize_payload(request))
     
     target_model = normalize_model_name(request.model)
-    full_prompt, extracted_files = build_context_prompt(request.messages)
+    full_prompt, extracted_files, files_to_cleanup = build_context_prompt(request.messages)
     if DEBUG_MODE:
         logger.debug("Constructed prompt for Gemini (model=%s): %s", target_model, full_prompt)
         if extracted_files:
@@ -320,7 +323,7 @@ async def chat_completions(request: OpenAIChatRequest):
                 files=extracted_files if extracted_files else None,
             )
             return StreamingResponse(
-                generate_openai_stream(stream_gen, request.model, cleanup_files=extracted_files),
+                generate_openai_stream(stream_gen, request.model, cleanup_files=files_to_cleanup),
                 media_type="text/event-stream"
             )
 
@@ -383,8 +386,8 @@ async def chat_completions(request: OpenAIChatRequest):
     finally:
         # Cleanup temporary files
         # NOTE: If streaming, extracted_files are cleaned up in generate_openai_stream
-        if 'extracted_files' in locals() and extracted_files and not request.stream:
-            for file_path in extracted_files:
+        if 'files_to_cleanup' in locals() and files_to_cleanup and not request.stream:
+            for file_path in files_to_cleanup:
                 try:
                     if os.path.exists(file_path):
                         os.remove(file_path)
