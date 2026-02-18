@@ -218,6 +218,14 @@ if __name__ == "__main__":
     # Fix: Set the asyncio event loop policy for Windows in the main process as well.
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        multiprocessing.set_start_method("spawn", force=True)
+    else:
+         try:
+             # Use spawn on Linux/macOS to avoid fork-safety issues with asyncio/clients
+             multiprocessing.set_start_method("spawn", force=True)
+         except RuntimeError:
+             pass 
+
     # This must be the first line inside the main block for multiprocessing on Windows.
     multiprocessing.freeze_support()
 
