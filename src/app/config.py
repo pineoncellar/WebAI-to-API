@@ -40,6 +40,33 @@ def load_config(config_file: str = "config.conf") -> configparser.ConfigParser:
         config["Auth"] = {"api_key": ""}
     if "Logging" not in config:
         config["Logging"] = {"debug": "false"}
+    
+    if "CustomHeaders" not in config:
+        config["CustomHeaders"] = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "X-Same-Domain": "1",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Chromium";v="145", "Google Chrome";v="145"',
+            "Sec-Ch-Ua-Arch": '"x86"',
+            "Sec-Ch-Ua-Bitness": '"64"',
+            "Sec-Ch-Ua-Form-Factors": '"Desktop"',
+            "Sec-Ch-Ua-Full-Version": '"145.0.7632.76"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Model": '""',
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Ch-Ua-Platform-Version": '"12.0.0"',
+            "Sec-Ch-Ua-Wow64": "?0",
+            "X-Browser-Channel": "stable",
+            "X-Browser-Year": "1969",
+            "X-Goog-Ext-525005358-jspb": '["37CE75D3-5F5D-4E7E-89AB-EE274C4C61A9",1]',
+            "X-Goog-Ext-73010989-jspb": "[0]",
+            "Origin": "https://gemini.google.com",
+            "Referer": "https://gemini.google.com/",
+        }
 
     # Save changes to the configuration file, also with UTF-8 encoding.
     save_config(config, config_file)

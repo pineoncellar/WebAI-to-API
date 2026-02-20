@@ -8,7 +8,7 @@ import base64
 import time
 import httpx
 from gemini_webapi import GeminiClient as WebGeminiClient
-from app.config import is_debug_mode
+from app.config import CONFIG, is_debug_mode
 from app.logger import logger
 
 class MyGeminiClient:
@@ -24,6 +24,14 @@ class MyGeminiClient:
         """Initialize the Gemini client."""
         # Increase timeout for file uploads and long responses
         await self.client.init(timeout=120)
+
+        # After initialization, override with more complete browser headers to reduce Google's internal verification delay
+        custom_headers = dict(CONFIG["CustomHeaders"])
+        
+        if self.client.client:
+            self.client.client.headers.update(custom_headers)
+            if self._debug:
+                logger.debug("Gemini client headers updated with browser impersonation from config.")
 
     async def generate_content(self, message: str, model: str, files: Optional[List[Union[str, Path]]] = None):
         """
