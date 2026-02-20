@@ -232,42 +232,83 @@ async def generate_openai_stream(data_source, model: str, cleanup_files: list = 
                 last_text_len = 0
                 last_thought_len = 0
                 
+                # 在循环外记录最终的完整文本，以便最后一次性清空缓冲区
+                final_text = ""
+                final_thoughts = ""
+                
+                # 缓冲区大小：保留末尾 20 个字符不发送，防止包含上游临时补全的 Markdown 闭合标签
+                BUFFER_SIZE = 20 
+                
                 async for chunk in data_source:
                     # 1. Handle Thoughts (Reasoning Content)
-                    full_thoughts = getattr(chunk, "thoughts", "")
-                    if full_thoughts and len(full_thoughts) > last_thought_len:
-                        piece = full_thoughts[last_thought_len:]
-                        last_thought_len = len(full_thoughts)
+                    chunk_thoughts = getattr(chunk, "thoughts", "")
+                    if chunk_thoughts:
+                        final_thoughts = chunk_thoughts
                         
-                        if piece:
-                            chunk_thought = {
-                                "id": request_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_time,
-                                "model": model,
-                                "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
-                            }
-                            yield f"data: {json.dumps(chunk_thought)}\n\n"
+                        # 计算安全发送的长度（去掉不稳定的尾部）
+                        safe_thought_len = max(0, len(final_thoughts) - BUFFER_SIZE)
+                        
+                        if safe_thought_len > last_thought_len:
+                            piece = final_thoughts[last_thought_len:safe_thought_len]
+                            last_thought_len = safe_thought_len
+                            
+                            if piece:
+                                chunk_thought = {
+                                    "id": request_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model,
+                                    "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
+                                }
+                                yield f"data: {json.dumps(chunk_thought)}\n\n"
 
                     # 2. Handle Text Content
-                    # Use total text length to calculate delta, ensuring no duplicates
-                    full_text = getattr(chunk, "text", "")
-                    if full_text and len(full_text) > last_text_len:
-                        piece = full_text[last_text_len:]
-                        last_text_len = len(full_text)
+                    chunk_text = getattr(chunk, "text", "")
+                    if chunk_text:
+                        final_text = chunk_text
                         
-                        if piece:
-                            chunk_content = {
-                                "id": request_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_time,
-                                "model": model,
-                                "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
-                            }
-                            yield f"data: {json.dumps(chunk_content)}\n\n"
+                        # 计算安全发送的长度（去掉不稳定的尾部）
+                        safe_text_len = max(0, len(final_text) - BUFFER_SIZE)
+                        
+                        if safe_text_len > last_text_len:
+                            piece = final_text[last_text_len:safe_text_len]
+                            last_text_len = safe_text_len
+                            
+                            if piece:
+                                chunk_content = {
+                                    "id": request_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model,
+                                    "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                                }
+                                yield f"data: {json.dumps(chunk_content)}\n\n"
+
+                # 3. 循环结束后，清空并发送缓冲区中剩余的真实尾部内容 (Flush remaining buffers)
+                if final_thoughts and len(final_thoughts) > last_thought_len:
+                    piece = final_thoughts[last_thought_len:]
+                    chunk_thought = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_time,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"reasoning_content": piece}, "finish_reason": None}]
+                    }
+                    yield f"data: {json.dumps(chunk_thought)}\n\n"
+                    
+                if final_text and len(final_text) > last_text_len:
+                    piece = final_text[last_text_len:]
+                    chunk_content = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_time,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]
+                    }
+                    yield f"data: {json.dumps(chunk_content)}\n\n"
+
             except Exception as e:
                 logger.error(f"Error during streaming generation: {e}", exc_info=True)
-                # Optionally yield an error chunk or just stop
 
         # 3. Send final chunk
         chunk_finish = {
