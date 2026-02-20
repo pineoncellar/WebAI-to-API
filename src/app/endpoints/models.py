@@ -1,5 +1,6 @@
 # src/app/endpoints/models.py
 import time
+import re
 import asyncio
 from fastapi import APIRouter
 from gemini_webapi.constants import Model as GeminiModel
@@ -88,3 +89,51 @@ async def list_models():
         "object": "list",
         "data": response_data
     }
+
+@router.get("/models/force_discovery")
+@router.get("/v1/models/force_discovery")
+async def force_discover_models():
+    """
+    Force discovery of models by triggering a validation error in the underlying library.
+    This simulates behavior from previous versions to catch models not yet in constants.
+    """
+    client = get_gemini_client()
+    if not client:
+        return {"error": "Gemini client not initialized"}
+
+    try:
+        # Intentionally request an invalid model to trigger the validation error
+        # which contains the list of available models.
+        await client.generate_content("test", model="FORCE_MODEL_DISCOVERY_HACK")
+        return {"error": "Failed to trigger model validation error"}
+    except Exception as e:
+        error_str = str(e)
+        # Look for pattern: "Available models: unspecified, model1, model2, ..."
+        match = re.search(r"Available models:\s*(.+)", error_str)
+        if match:
+            models_str = match.group(1)
+            # Split by comma and clean up
+            models_list = [m.strip() for m in models_str.split(",")]
+            # Filter out 'unspecified' and empty strings
+            valid_models = [m for m in models_list if m and m.lower() != "unspecified"]
+            
+            if valid_models:
+                # Update cache as well since we found valid models
+                global _CACHED_MODELS, _CACHE_TIMESTAMP
+                _CACHED_MODELS = valid_models
+                _CACHE_TIMESTAMP = time.time()
+                
+                return {
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": int(_CACHE_TIMESTAMP),
+                            "owned_by": "google",
+                            "root": model_id
+                        } for model_id in valid_models
+                    ]
+                }
+        
+        return {"error": f"Could not parse models from error: {error_str}"}
