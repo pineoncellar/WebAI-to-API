@@ -657,33 +657,65 @@ def get_cookie_from_browser(service: Literal["gemini"]) -> Optional[tuple]:
     # Process cookies for the requested service
     if service == "gemini":
         logger.info("Looking for Gemini cookies (__Secure-1PSID and __Secure-1PSIDTS)...")
-        secure_1psid = None
-        secure_1psidts = None
+        # 使用列表存储
+        psid_list = []
+        psidts_list = []
         
         try:
             for cookie in cookies:
                 if hasattr(cookie, 'name') and hasattr(cookie, 'value') and hasattr(cookie, 'domain'):
-                    if cookie.name == "__Secure-1PSID" and "google" in cookie.domain:
-                        secure_1psid = cookie.value
-                        logger.info(f"Found __Secure-1PSID: {secure_1psid[:20]}..." if secure_1psid else "Found __Secure-1PSID (empty value)")
-                    elif cookie.name == "__Secure-1PSIDTS" and "google" in cookie.domain:
-                        secure_1psidts = cookie.value
-                        logger.info(f"Found __Secure-1PSIDTS: {secure_1psidts[:20]}..." if secure_1psidts else "Found __Secure-1PSIDTS (empty value)")
+                    if "google" in cookie.domain:
+                        if cookie.name == "__Secure-1PSID":
+                            # 过滤重复项
+                            if cookie.value not in psid_list:
+                                psid_list.append(cookie.value)
+                                logger.info(f"Detected unique __Secure-1PSID: {cookie.value[:20]}...")
+                        elif cookie.name == "__Secure-1PSIDTS":
+                            # 如果值相同，不重复添加；但这里要小心，如果多个账号共享同一个TS值（不太可能，但防万一）
+                            if cookie.value not in psidts_list:
+                                psidts_list.append(cookie.value)
+                                logger.info(f"Detected unique __Secure-1PSIDTS: {cookie.value[:20]}...")
         except Exception as e:
             logger.error(f"Error processing cookies: {e}")
             return None
         
-        if secure_1psid and secure_1psidts:
-            # Check if values are not empty (they might be encrypted on Windows)
-            if len(secure_1psid.strip()) == 0 or len(secure_1psidts.strip()) == 0:
-                logger.warning("Gemini cookies found but appear to be empty (possibly encrypted). Manual cookie extraction may be required on Windows.")
-                return None
+        account_index = CONFIG["Browser"].getint("account_index", 0)
+        logger.info(f"Target account index: {account_index} (PSIDs: {len(psid_list)}, TSes: {len(psidts_list)})")
+        
+        secure_1psid = None
+        secure_1psidts = None
+
+        if len(psid_list) > account_index:
+            secure_1psid = psid_list[account_index]
+            # 改进逻辑：如果TS数量少于PSID数量，说明有些账号是不活跃的。
+            # 通常活跃账号的TS会排在列表的最前面或者最后面（取决于浏览器返回顺序）。
+            # 鉴于 DevTools 返回的列表，活跃的 TS 往往是最近更新的。
             
-            logger.info("Both Gemini cookies found and appear valid.")
-            return secure_1psid, secure_1psidts
+            if len(psidts_list) > account_index:
+                # 理想情况：TS数量够多，一一对应
+                secure_1psidts = psidts_list[account_index]
+            elif len(psidts_list) == 1:
+                # 常见情况：只检测到一个活跃 TS，那它肯定属于当前活跃的那个账号。
+                # 无论 account_index 是几，只要我们在浏览器里最后操作的是那个账号，这个 TS 就是对的。
+                secure_1psidts = psidts_list[0]
+                logger.warning(f"Only one TS found. Assuming it belongs to the target account (index {account_index}).")
+            elif psidts_list:
+                # 兜底：取最后一个
+                secure_1psidts = psidts_list[-1]
+                logger.warning(f"Exact TS for index {account_index} not found, using the last available TS.")
+            
+            logger.info(f"Selected cookies for account index {account_index}")
+        elif psid_list and psidts_list:
+            secure_1psid = psid_list[-1]
+            secure_1psidts = psidts_list[-1]
+            logger.warning(f"Account index {account_index} out of range, falling back to last detected cookies.")
         else:
             logger.warning("Gemini cookies not found or incomplete.")
             return None
+
+        if secure_1psid and secure_1psidts:
+            return secure_1psid, secure_1psidts
+        return None
     else:
         logger.warning(f"Unsupported service: {service}")
         return None
