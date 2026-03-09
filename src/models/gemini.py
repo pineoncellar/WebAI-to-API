@@ -125,6 +125,29 @@ class MyGeminiClient:
             # Simple regex search for the full resolution image URL
             urls = re.findall(r"https://lh3\.googleusercontent\.com/gg-dl/[A-Za-z0-9_-]+", text)
             
+            # If standard pattern fails, try a broader one (handling potential URL format changes)
+            if not urls:
+                # Capture generic lh3.googleusercontent.com URLs that are likely images
+                # Matches from https://... until a quote or whitespace
+                # This captures both escaped (\/) and unescaped (/) slashes from JSON
+                potential_matches = re.findall(r"https://lh3\.googleusercontent\.com/[^\" ]+", text)
+                
+                valid_urls = []
+                for match in potential_matches:
+                     # Remove backslashes if any (from escaped JSON)
+                     clean_url = match.replace("\\", "")
+                     # Filter out short URLs (avatars/icons) and ensure it looks like an image URL
+                     if len(clean_url) > 50:
+                         valid_urls.append(clean_url)
+                
+                urls = valid_urls
+                if urls and self._debug:
+                    logger.debug(f"Found image URLs using fallback pattern: {urls}")
+
+            if not urls:
+                # Log the response text to help debugging
+                logger.warning(f"No image URLs found in response. Response preview: {text[:1000]}")
+
             if urls:
                 image_url = urls[0]
                 if self._debug:
